@@ -1,0 +1,20 @@
+services:
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    restart: unless-stopped
+    command:
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --realm=${TURN_REALM:?Set TURN_REALM in .env}
+      - --external-ip=${TURN_EXTERNAL_IP:?Set TURN_EXTERNAL_IP in .env}
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:?Set TURN_SECRET in .env}
+      - --fingerprint
+      - --no-cli
+      - --no-multicast-peers
+      - --stale-nonce=600
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"

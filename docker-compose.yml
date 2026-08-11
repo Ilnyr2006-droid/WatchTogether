@@ -1,0 +1,12 @@
+services:
+  watchtogether:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_WEBRTC_DEBUG: ${NEXT_PUBLIC_WEBRTC_DEBUG:-false}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${WATCHTOGETHER_PORT:-47821}:${WATCHTOGETHER_PORT:-47821}"
