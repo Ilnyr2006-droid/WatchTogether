@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RoomManager } from "@/server/room-manager";
 import { canRelaySignal } from "@/server/signaling";
-import { signalCandidateSchema, signalDescriptionSchema } from "@/server/validation";
+import { signalCandidateSchema, signalDescriptionSchema, videoSourceSelectionSchema } from "@/server/validation";
 
 describe("signaling authorization and validation", () => {
   it("allows only different peers in the same room", () => {
@@ -17,5 +17,11 @@ describe("signaling authorization and validation", () => {
     expect(signalDescriptionSchema.safeParse({ to: "peer", description: { type: "offer", sdp: "x".repeat(64_001) } }).success).toBe(false);
     expect(signalCandidateSchema.safeParse({ to: "peer", candidate: { candidate: "x".repeat(4_097) } }).success).toBe(false);
     expect(signalCandidateSchema.safeParse({ to: "peer", candidate: { candidate: "candidate:1", sdpMid: "0", sdpMLineIndex: 0 } }).success).toBe(true);
+  });
+
+  it("accepts bounded P2P metadata and rejects malformed source ids", () => {
+    const valid = { p2pMovie: { fileName: "movie.mp4", size: 10_000, duration: 120, mimeCodec: 'video/mp4; codecs="avc1.64001f,mp4a.40.2"', codecs: ["avc1.64001f", "mp4a.40.2"], width: 1920, height: 1080, sourceId: "a".repeat(32) } };
+    expect(videoSourceSelectionSchema.safeParse(valid).success).toBe(true);
+    expect(videoSourceSelectionSchema.safeParse({ p2pMovie: { ...valid.p2pMovie, sourceId: "../secret" } }).success).toBe(false);
   });
 });

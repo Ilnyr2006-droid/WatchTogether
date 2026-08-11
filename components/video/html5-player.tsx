@@ -23,7 +23,7 @@ export function Html5Player({ socket, isHost, video, localUrl, localFileName, ro
       ? video.source.url
       : video.source.mode === "local"
         ? localFileName === video.source.fileName ? localUrl ?? undefined : undefined
-        : streamToken ? `/api/rooms/${encodeURIComponent(roomId)}/stream?token=${encodeURIComponent(streamToken)}&v=${encodeURIComponent(video.source.streamId)}` : undefined
+        : video.source.mode === "host-stream" && streamToken ? `/api/rooms/${encodeURIComponent(roomId)}/stream?token=${encodeURIComponent(streamToken)}&v=${encodeURIComponent(video.source.streamId)}` : undefined
     : undefined;
   const fullscreen = useCallback(() => { void videoRef.current?.requestFullscreen(); }, []);
   const localName = video.source?.provider === "html5" && video.source.mode === "local" ? video.source.fileName : null;

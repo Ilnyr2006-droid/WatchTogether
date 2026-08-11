@@ -30,7 +30,7 @@ export function isPublicIpv4(candidate: string) {
 }
 
 export function configuredPublicBaseUrl() {
-  const value = process.env.WATCHTOGETHER_PUBLIC_URL?.trim();
+  const value = (process.env.PUBLIC_URL || process.env.WATCHTOGETHER_PUBLIC_URL)?.trim();
   if (!value) return null;
   try {
     const url = new URL(value);

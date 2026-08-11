@@ -10,4 +10,12 @@ describe("separate rate limit buckets", () => {
     expect([ice.allow("socket", 101), ice.allow("socket", 102), ice.allow("socket", 103)]).toEqual([true, true, true]);
     expect(ice.allow("socket", 104)).toBe(false);
   });
+
+  it("keeps voice and movie ICE candidate budgets independent", () => {
+    const voiceIce = new RateLimiter(1, 10_000);
+    const movieIce = new RateLimiter(1, 10_000);
+    expect(voiceIce.allow("socket", 100)).toBe(true);
+    expect(voiceIce.allow("socket", 101)).toBe(false);
+    expect(movieIce.allow("socket", 101)).toBe(true);
+  });
 });

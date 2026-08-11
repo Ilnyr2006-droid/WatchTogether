@@ -106,8 +106,11 @@ export class RoomManager {
     const room = this.getBySocket(socketId);
     if (!room || room.hostId !== socketId) return null;
     room.video = { source, currentTime: 0, playing: false, updatedAt: Date.now() };
-    const isLocal = source.provider === "html5" && source.mode === "local";
-    room.participants.forEach((participant) => { participant.ready = participant.socketId === socketId && !isLocal; });
+    const requiresClientFile = source.provider === "html5" && source.mode === "local";
+    const streamsFromHost = source.provider === "html5" && source.mode === "p2p-movie";
+    room.participants.forEach((participant) => {
+      participant.ready = participant.socketId === socketId ? !requiresClientFile : !streamsFromHost && !requiresClientFile;
+    });
     return { ...room.video };
   }
 
