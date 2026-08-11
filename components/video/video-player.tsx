@@ -402,8 +402,11 @@ export function VideoPlayer({
               <input
                 className="sr-only"
                 type="file"
-                accept="video/mp4,.mp4"
+                accept="video/*,.mp4,.mkv,.avi,.mov,.m4v,.ts,.m2ts,.wmv"
                 disabled={loading}
+                onClick={(event) => {
+                  event.currentTarget.value = "";
+                }}
                 onChange={(event) => {
                   void selectP2PMovie(event.target.files?.[0]);
                 }}

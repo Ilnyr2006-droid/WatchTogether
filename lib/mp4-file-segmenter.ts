@@ -78,7 +78,9 @@ export async function inspectP2PMovie(
   file: File,
 ): Promise<P2PMovieSourceInput> {
   if (!/\.mp4$/i.test(file.name) && file.type !== "video/mp4")
-    throw new Error("Для P2P MVP выберите файл MP4");
+    throw new Error(
+      "Этот формат нельзя воспроизвести напрямую в браузере. Требуется конвертация в MP4 H.264/AVC + AAC.",
+    );
   const { iso, info } = await openMp4(file);
   const { video, codecs, mimeCodec } = supportedTracks(info);
   iso.stop();
