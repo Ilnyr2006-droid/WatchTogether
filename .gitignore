@@ -6,6 +6,7 @@ node_modules/
 coverage/
 outputs/
 work/
+.runtime/
 *.log
 *.tsbuildinfo
 .DS_Store
