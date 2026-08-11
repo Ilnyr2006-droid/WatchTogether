@@ -3,6 +3,7 @@
 import { RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { effectiveVideoTime, needsTimeCorrection } from "@/lib/video-sync";
+import { classifyRutubePlayerError, type RutubePlayerStatus } from "@/lib/rutube-player-state";
 import type { ClientToServerEvents, ServerToClientEvents, VideoState } from "@/types/realtime";
 
 const RUTUBE_ORIGIN = "https://rutube.ru";
@@ -27,10 +28,9 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
   isHost: boolean;
   video: VideoState;
 }) {
-  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState<RutubePlayerStatus>("loading");
   const [advertising, setAdvertising] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
-  const [error, setError] = useState("");
   const readyRef = useRef(false);
   const advertisingRef = useRef(false);
   const currentTimeRef = useRef(0);
@@ -63,8 +63,8 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
   useEffect(() => { applyRemoteState(video); }, [applyRemoteState, video]);
 
   useEffect(() => {
-    if (ready) command({ type: isHost ? "player:showControls" : "player:hideControls", data: {} });
-  }, [command, isHost, ready]);
+    if (status === "ready") command({ type: isHost ? "player:showControls" : "player:hideControls", data: {} });
+  }, [command, isHost, status]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -73,12 +73,17 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
       if (!message) return;
 
       if (message.type === "player:ready") {
-        readyRef.current = true; setReady(true); setError("");
+        readyRef.current = true; setStatus("ready");
         command({ type: isHost ? "player:showControls" : "player:hideControls", data: {} });
         applyRemoteState(latestVideoRef.current, true);
         return;
       }
-      if (message.type === "player:error") { setError("RUTUBE не смог загрузить видео"); return; }
+      if (message.type === "player:error") {
+        if (message.data?.fatal === false) return;
+        readyRef.current = false; advertisingRef.current = false; setAdvertising(false);
+        setStatus(classifyRutubePlayerError(message.data));
+        return;
+      }
       if (message.type === "player:durationChange") {
         const value = Number(message.data?.duration);
         if (Number.isFinite(value) && value >= 0) setDuration(value);
@@ -132,5 +137,5 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
   }, [isHost, socket]);
 
   const changeVideo = useCallback((nextVideoId: string) => command({ type: "player:changeVideo", data: { id: nextVideoId } }), [command]);
-  return { ready, advertising, duration, error, command, changeVideo };
+  return { status, ready: status === "ready", advertising, duration, command, changeVideo };
 }
