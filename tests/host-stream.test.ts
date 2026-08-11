@@ -8,20 +8,21 @@ import type { Server } from "socket.io";
 import { handleHostStreamRequest } from "@/server/host-stream-http";
 import { HostStreamRegistry, UNSUPPORTED_MEDIA_MESSAGE } from "@/server/host-stream-registry";
 import { HostMediaCatalog } from "@/server/host-media-catalog";
+import type { HostFilePicker } from "@/server/host-file-picker";
 import { RoomManager } from "@/server/room-manager";
 import type { ClientToServerEvents, InterServerEvents, ServerToClientEvents, SocketData } from "@/types/realtime";
 
 type RealtimeServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 describe("protected host file streaming", () => {
-  let directory: string; let moviePath: string; let rooms: RoomManager; let streams: HostStreamRegistry; let media: HostMediaCatalog;
+  let directory: string; let moviePath: string; let rooms: RoomManager; let streams: HostStreamRegistry; let media: HostMediaCatalog; let picker: HostFilePicker;
   let server: HttpServer; let baseUrl: string; const emit = vi.fn(); const io = { to: () => ({ emit }) } as unknown as RealtimeServer;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "watch-stream-")); moviePath = join(directory, "movie.mp4");
     await writeFile(moviePath, Buffer.from("0123456789"));
-    rooms = new RoomManager(); streams = new HostStreamRegistry(); media = new HostMediaCatalog(directory); emit.mockClear();
-    server = createServer((request, response) => { void handleHostStreamRequest(request, response, { rooms, streams, media, io }); });
+    rooms = new RoomManager(); streams = new HostStreamRegistry(); media = new HostMediaCatalog(directory); picker = { pick: vi.fn().mockResolvedValue(null) }; emit.mockClear();
+    server = createServer((request, response) => { void handleHostStreamRequest(request, response, { rooms, streams, media, picker, io }); });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)); baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
 
@@ -53,6 +54,24 @@ describe("protected host file streaming", () => {
     expect(response.status).toBe(206); expect(response.headers.get("content-type")).toBe("video/mp4"); expect(response.headers.get("content-length")).toBe("4");
     expect(response.headers.get("content-range")).toBe("bytes 2-5/10"); expect(response.headers.get("accept-ranges")).toBe("bytes"); expect(await response.text()).toBe("2345");
     const invalid = await fetch(endpoint, { headers: { Range: "bytes=20-30" } }); expect(invalid.status).toBe(416); expect(invalid.headers.get("content-range")).toBe("bytes */10");
+  });
+
+  it("lets only Host pick a file from any absolute location without exposing its path", async () => {
+    const pickedDirectory = await mkdtemp(join(tmpdir(), "watch-picked-"));
+    try {
+      const pickedPath = join(pickedDirectory, "picked.webm"); await writeFile(pickedPath, "video");
+      const { room, hostToken, guestToken } = createProtectedRoom();
+      picker.pick = vi.fn().mockResolvedValue(pickedPath);
+      const endpoint = `${baseUrl}/api/rooms/${room.id}/host-stream/pick`;
+      expect((await fetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${guestToken}` } })).status).toBe(403);
+      expect(picker.pick).not.toHaveBeenCalled();
+      const response = await fetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${hostToken}` } });
+      const body = await response.json() as { fileName: string };
+      expect(response.status).toBe(200); expect(body.fileName).toBe("picked.webm");
+      expect(JSON.stringify(body)).not.toContain(pickedDirectory);
+      expect(JSON.stringify(rooms.get(room.id))).not.toContain(pickedDirectory);
+      expect(rooms.get(room.id)?.video.source).toMatchObject({ mode: "host-stream", fileName: "picked.webm" });
+    } finally { await rm(pickedDirectory, { recursive: true, force: true }); }
   });
 
   it("rejects outsider tokens and browser-incompatible catalog files", async () => {

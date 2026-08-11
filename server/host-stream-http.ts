@@ -6,6 +6,7 @@ import { HostStreamRegistry, UnsupportedHostMediaError, UNSUPPORTED_MEDIA_MESSAG
 import { parseByteRange } from "./http-range";
 import type { RoomManager } from "./room-manager";
 import type { HostMediaCatalog } from "./host-media-catalog";
+import type { HostFilePicker } from "./host-file-picker";
 
 type RealtimeServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
@@ -13,16 +14,16 @@ export interface HostStreamHttpDependencies {
   rooms: RoomManager;
   streams: HostStreamRegistry;
   media: HostMediaCatalog;
+  picker: HostFilePicker;
   io: RealtimeServer;
 }
 
-const ROUTE = /^\/api\/rooms\/([a-z0-9]{10})\/(stream|host-stream\/(?:files|select))$/;
+const ROUTE = /^\/api\/rooms\/([a-z0-9]{10})\/(stream|host-stream\/(?:files|select|pick))$/;
 
 export async function handleHostStreamRequest(request: IncomingMessage, response: ServerResponse, dependencies: HostStreamHttpDependencies) {
   const url = new URL(request.url || "/", "http://localhost");
   const match = ROUTE.exec(url.pathname);
   if (!match) return false;
-  if (!dependencies.media.isConfigured()) { sendJson(response, 503, { error: "На сервере не настроена папка WATCHTOGETHER_MEDIA_DIR" }); return true; }
   const [, roomId, action] = match;
 
   if (action === "host-stream/files") {
@@ -31,6 +32,10 @@ export async function handleHostStreamRequest(request: IncomingMessage, response
   }
   if (action === "host-stream/select") {
     await selectHostFile(request, response, roomId, dependencies);
+    return true;
+  }
+  if (action === "host-stream/pick") {
+    await pickHostFile(request, response, roomId, dependencies);
     return true;
   }
 
@@ -43,6 +48,7 @@ async function listHostFiles(request: IncomingMessage, response: ServerResponse,
   const session = authorizeBearerHost(request, roomId, dependencies);
   if (session === "unauthorized") return sendJson(response, 401, { error: "Сначала войдите в эту комнату" });
   if (session === "forbidden") return sendJson(response, 403, { error: "Список фильмов доступен только Host" });
+  if (!dependencies.media.isConfigured()) return sendJson(response, 503, { error: "Дополнительная папка WATCHTOGETHER_MEDIA_DIR не настроена" });
   try { return sendJson(response, 200, { files: await dependencies.media.list() }); }
   catch { return sendJson(response, 422, { error: "Не удалось прочитать папку с фильмами" }); }
 }
@@ -52,6 +58,7 @@ async function selectHostFile(request: IncomingMessage, response: ServerResponse
   const session = authorizeBearerHost(request, roomId, dependencies);
   if (session === "unauthorized") return sendJson(response, 401, { error: "Сначала войдите в эту комнату" });
   if (session === "forbidden") return sendJson(response, 403, { error: "Только Host может выбрать фильм" });
+  if (!dependencies.media.isConfigured()) return sendJson(response, 503, { error: "Дополнительная папка WATCHTOGETHER_MEDIA_DIR не настроена" });
 
   try {
     const body = await readSelection(request);
@@ -68,6 +75,27 @@ async function selectHostFile(request: IncomingMessage, response: ServerResponse
   } catch (error) {
     if (error instanceof UnsupportedHostMediaError) return sendJson(response, 415, { error: UNSUPPORTED_MEDIA_MESSAGE });
     return sendJson(response, 422, { error: "Файл не найден или недоступен для чтения" });
+  }
+}
+
+async function pickHostFile(request: IncomingMessage, response: ServerResponse, roomId: string, dependencies: HostStreamHttpDependencies) {
+  if (request.method !== "POST") return methodNotAllowed(response, "POST");
+  const session = authorizeBearerHost(request, roomId, dependencies);
+  if (session === "unauthorized") return sendJson(response, 401, { error: "Сначала войдите в эту комнату" });
+  if (session === "forbidden") return sendJson(response, 403, { error: "Только Host может выбрать фильм" });
+
+  try {
+    const selectedPath = await dependencies.picker.pick();
+    if (!selectedPath) return sendJson(response, 200, { cancelled: true });
+    const file = await dependencies.streams.register(roomId, selectedPath);
+    const source: VideoSource = { provider: "html5", mode: "host-stream", fileName: file.fileName, streamId: file.streamId };
+    const video = dependencies.rooms.setSource(session.socketId, source);
+    if (!video) { dependencies.streams.clear(roomId); return sendJson(response, 409, { error: "Host или комната изменились во время выбора файла" }); }
+    dependencies.io.to(roomId).emit("video:state", video);
+    return sendJson(response, 200, { cancelled: false, fileName: file.fileName });
+  } catch (error) {
+    if (error instanceof UnsupportedHostMediaError) return sendJson(response, 415, { error: UNSUPPORTED_MEDIA_MESSAGE });
+    return sendJson(response, 422, { error: "Не удалось открыть выбранный файл" });
   }
 }
 

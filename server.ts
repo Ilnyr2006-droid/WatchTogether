@@ -6,6 +6,7 @@ import { handleHostStreamRequest } from "./server/host-stream-http";
 import { HostStreamRegistry } from "./server/host-stream-registry";
 import { RoomManager } from "./server/room-manager";
 import { HostMediaCatalog } from "./server/host-media-catalog";
+import { NativeHostFilePicker } from "./server/host-file-picker";
 
 async function main() {
   try { loadEnvFile(); } catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
@@ -19,11 +20,12 @@ async function main() {
   const rooms = new RoomManager();
   const streams = new HostStreamRegistry();
   const media = new HostMediaCatalog();
+  const picker = new NativeHostFilePicker();
   let realtime: ReturnType<typeof attachSocketServer> | null = null;
   const server = createServer((request, response) => {
     void (async () => {
       try {
-        if (realtime && await handleHostStreamRequest(request, response, { rooms, streams, media, io: realtime.io })) return;
+        if (realtime && await handleHostStreamRequest(request, response, { rooms, streams, media, picker, io: realtime.io })) return;
         await handle(request, response);
       } catch {
         if (!response.headersSent) response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
