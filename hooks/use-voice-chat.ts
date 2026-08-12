@@ -4,10 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { IceCandidateQueue, decideIncomingDescription, isPolitePeer } from "@/lib/webrtc-negotiation";
 import { reconcilePeerIds, recoveryAction } from "@/lib/webrtc-recovery";
+import { microphoneConstraintAttempts } from "@/lib/microphone-constraints";
 import type { ClientToServerEvents, Participant, ServerToClientEvents, VoiceConnectionState, VoiceDiagnostic } from "@/types/realtime";
 
 const FALLBACK_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
-const ENHANCED_AUDIO: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
 
 interface PeerContext {
   id: string;
@@ -29,12 +29,12 @@ interface PeerContext {
 interface IceServerApiResponse { iceServers?: RTCIceServer[]; expiresAt?: number | null }
 
 async function requestMicrophone(deviceId?: string) {
-  const selectedDevice = deviceId ? { deviceId: { exact: deviceId } } : {};
-  const attempts: MediaStreamConstraints[] = [
-    { audio: { ...ENHANCED_AUDIO, ...selectedDevice }, video: false },
-    { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...selectedDevice }, video: false },
-    { audio: deviceId ? selectedDevice : true, video: false },
-  ];
+  const supported = navigator.mediaDevices.getSupportedConstraints() as
+    MediaTrackSupportedConstraints & { voiceIsolation?: boolean };
+  const attempts = microphoneConstraintAttempts(
+    deviceId,
+    supported.voiceIsolation === true,
+  );
   let lastError: unknown;
   for (const constraints of attempts) {
     try { return await navigator.mediaDevices.getUserMedia(constraints); }
