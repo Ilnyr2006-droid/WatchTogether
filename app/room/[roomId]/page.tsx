@@ -147,7 +147,11 @@ export default function RoomPage() {
   };
   const leave = () => {
     socket.emit("room:leave");
-    router.push("/");
+  };
+  const goHome = () => {
+    socket.emit("room:leave");
+    sessionStorage.removeItem(`watchtogether:room-token:${params.roomId}`);
+    sessionStorage.removeItem(`watchtogether:invitation:${params.roomId}`);
   };
 
   if (!room) {
@@ -169,12 +173,16 @@ export default function RoomPage() {
             {blockingError || "Подключаемся к комнате…"}
           </p>
           {blockingError && (
-            <button
+            // A document reload is intentional: a failed room can leave the
+            // client router in a stale state after its URL already changed.
+            // eslint-disable-next-line @next/next/no-html-link-for-pages
+            <a
+              href="/"
               className="button-secondary mt-5"
-              onClick={() => router.push("/")}
+              onClick={goHome}
             >
               На главную
-            </button>
+            </a>
           )}
         </div>
       </main>
@@ -207,13 +215,16 @@ export default function RoomPage() {
               {copied ? "Скопировано" : "Пригласить"}
             </span>
           </button>
-          <button
+          {/* A full reload guarantees all room and WebRTC state is discarded. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
+            href="/"
             className="button-secondary py-2 text-sm text-red-300"
             onClick={leave}
           >
             <LogOut className="size-4" />
             <span className="hidden sm:inline">Выйти</span>
-          </button>
+          </a>
         </div>
       </header>
       {error && (
