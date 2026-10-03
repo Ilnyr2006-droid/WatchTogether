@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { configuredPublicBaseUrl, lookupPublicIpv4 } from "@/server/public-ip";
+import { isE2ETestMode } from "@/server/e2e-mode";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  if (process.env.WATCHTOGETHER_E2E === "1") {
+  if (isE2ETestMode()) {
     const port = Number(process.env.WATCHTOGETHER_PORT || process.env.PORT || 47821);
     return NextResponse.json({ publicBaseUrl: `http://127.0.0.1:${port}`, publicIp: null, port }, {
       headers: { "Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff" },

@@ -9,9 +9,14 @@ export default defineConfig({
   timeout: 45_000,
   expect: { timeout: 10_000 },
   reporter: "list",
-  use: { ...devices["Desktop Chrome"], baseURL, trace: "retain-on-failure" },
+  use: {
+    ...devices["Desktop Chrome"],
+    baseURL,
+    trace: "retain-on-failure",
+    launchOptions: { args: ["--disable-features=WebRtcHideLocalIpsWithMdns"] },
+  },
   webServer: {
-    command: "HOSTNAME=127.0.0.1 WATCHTOGETHER_PORT=4173 WATCHTOGETHER_E2E=1 NEXT_PUBLIC_WATCHTOGETHER_E2E=1 npm run dev",
+    command: "cross-env HOSTNAME=127.0.0.1 WATCHTOGETHER_PORT=4173 WATCHTOGETHER_E2E=true npm run dev",
     url: `${baseURL}/api/network-info`,
     timeout: 120_000,
     reuseExistingServer: false,

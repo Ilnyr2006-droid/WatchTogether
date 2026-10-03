@@ -7,7 +7,8 @@ import { reconcilePeerIds, recoveryAction } from "@/lib/webrtc-recovery";
 import { microphoneConstraintAttempts } from "@/lib/microphone-constraints";
 import type { ClientToServerEvents, Participant, ServerToClientEvents, VoiceConnectionState, VoiceDiagnostic } from "@/types/realtime";
 
-const FALLBACK_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+const E2E_MODE = typeof document !== "undefined" && document.documentElement.dataset.watchtogetherE2e === "true";
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = E2E_MODE ? [] : [{ urls: "stun:stun.l.google.com:19302" }];
 
 interface PeerContext {
   id: string;
@@ -83,7 +84,7 @@ export function useVoiceChat(socket: Socket<ServerToClientEvents, ClientToServer
       .then(async (response) => {
         if (!response.ok) throw new Error("ICE configuration unavailable");
         const data = await response.json() as IceServerApiResponse;
-        if (!Array.isArray(data.iceServers) || data.iceServers.length === 0) throw new Error("Invalid ICE configuration");
+        if (!Array.isArray(data.iceServers) || (data.iceServers.length === 0 && !E2E_MODE)) throw new Error("Invalid ICE configuration");
         iceServersRef.current = data.iceServers;
         iceExpiresAtRef.current = typeof data.expiresAt === "number" ? data.expiresAt : null;
         return data.iceServers;

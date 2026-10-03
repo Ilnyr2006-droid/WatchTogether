@@ -65,6 +65,7 @@ export function P2PMoviePlayer({
     <div className="relative bg-black">
       <div className="relative aspect-video">
         <video
+          data-testid="shared-video"
           ref={videoRef}
           controls={canControl}
           playsInline
@@ -101,7 +102,7 @@ export function P2PMoviePlayer({
       </div>
       <div className="grid grid-cols-2 gap-2 border-t border-white/10 bg-slate-950/80 px-4 py-3 text-xs text-slate-300 sm:grid-cols-5">
         <span>
-          Состояние: <b>{stateText}</b>
+          Состояние: <b data-testid="p2p-state" data-state={p2p.state}>{stateText}</b>
         </span>
         <span>
           Буфер: <b>{p2p.bufferSeconds.toFixed(0)} сек.</b>
@@ -110,7 +111,7 @@ export function P2PMoviePlayer({
           Скорость: <b>{p2p.speedMbps.toFixed(1)} Mbps</b>
         </span>
         <span>
-          Передано: <b>{(p2p.transferredBytes / 1024 / 1024).toFixed(1)} MB</b>
+          Передано: <b data-testid="p2p-transferred-bytes" data-bytes={p2p.transferredBytes}>{(p2p.transferredBytes / 1024 / 1024).toFixed(1)} MB</b>
         </span>
         <span>
           Соединение:{" "}

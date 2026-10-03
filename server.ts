@@ -7,9 +7,15 @@ import { HostStreamRegistry } from "./server/host-stream-registry";
 import { RoomManager } from "./server/room-manager";
 import { HostMediaCatalog } from "./server/host-media-catalog";
 import { NativeHostFilePicker } from "./server/host-file-picker";
+import { isE2ETestMode } from "./server/e2e-mode";
+import { startE2EStunServer } from "./server/e2e-stun";
 
 async function main() {
   try { loadEnvFile(); } catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+  if (isE2ETestMode()) {
+    const stunServer = await startE2EStunServer();
+    process.env.WATCHTOGETHER_E2E_STUN_URL = stunServer.url;
+  }
   const dev = process.env.NODE_ENV !== "production";
   const hostname = process.env.HOSTNAME || "0.0.0.0";
   const port = Number(process.env.WATCHTOGETHER_PORT || process.env.PORT || 47821);

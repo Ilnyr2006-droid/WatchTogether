@@ -8,7 +8,7 @@ export function useSocket() {
   const [connected, setConnected] = useState(socket.connected);
 
   useEffect(() => {
-    if (process.env.NEXT_PUBLIC_WATCHTOGETHER_E2E === "1")
+    if (document.documentElement.dataset.watchtogetherE2e === "true")
       (window as Window & { __watchTogetherSocket?: typeof socket }).__watchTogetherSocket = socket;
     const onConnect = () => setConnected(true);
     const onDisconnect = () => setConnected(false);

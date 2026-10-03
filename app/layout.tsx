@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { isE2ETestMode } from "@/server/e2e-mode";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -7,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="ru"><body>{children}</body></html>;
+  return <html lang="ru" data-watchtogether-e2e={isE2ETestMode() ? "true" : undefined}><body>{children}</body></html>;
 }
