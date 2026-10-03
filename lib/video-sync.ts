@@ -6,13 +6,17 @@ export function isNewerVideoRevision(appliedRevision: number, incomingRevision: 
   return incomingRevision > appliedRevision;
 }
 
-export function shouldEmitPlaybackAction(
+export function getLocalPlaybackIntent(
   action: "play" | "pause",
   desiredPlaying: boolean | null,
-  applyingRemote: boolean,
 ) {
-  if (applyingRemote) return false;
-  return desiredPlaying !== (action === "play");
+  const nextDesiredPlaying = action === "play";
+  return {
+    // Remote play/pause events already match desiredPlaying, so duplicate
+    // echoes are suppressed without blocking a real user action for a timer.
+    shouldEmit: desiredPlaying !== nextDesiredPlaying,
+    desiredPlaying: nextDesiredPlaying,
+  };
 }
 
 export function effectiveVideoTime(video: VideoState, now = Date.now()): number {

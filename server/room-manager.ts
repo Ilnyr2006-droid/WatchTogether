@@ -167,7 +167,7 @@ export class RoomManager {
     const room = this.getBySocket(socketId);
     if (!room || !this.isHost(socketId)) return null;
     room.controlMode = mode;
-    if (mode !== "approved") { room.controlRequests = []; room.approvedControllerIds = []; }
+    if (mode !== "approved") room.controlRequests = [];
     return this.snapshot(room);
   }
   requestControl(socketId: string) {
@@ -251,6 +251,7 @@ export class RoomManager {
     this.socketTokens.delete(socketId);
   }
   private snapshot(room: RoomRecord): RoomState {
-    return { ...room, participants: room.participants.map((p) => ({ ...p })), video: { ...room.video, currentTime: effectiveVideoTime(room.video) }, controlRequests: [...room.controlRequests], approvedControllerIds: [...room.approvedControllerIds], messages: room.messages.map((message) => ({ ...message })) };
+    const now = Date.now();
+    return { ...room, participants: room.participants.map((p) => ({ ...p })), video: { ...room.video, currentTime: effectiveVideoTime(room.video, now), updatedAt: now }, controlRequests: [...room.controlRequests], approvedControllerIds: [...room.approvedControllerIds], messages: room.messages.map((message) => ({ ...message })) };
   }
 }

@@ -2,7 +2,7 @@
 
 import { RefObject, useCallback, useEffect, useRef } from "react";
 import type { Socket } from "socket.io-client";
-import { effectiveVideoTime, isNewerVideoRevision, needsTimeCorrection, shouldEmitPlaybackAction } from "@/lib/video-sync";
+import { effectiveVideoTime, getLocalPlaybackIntent, isNewerVideoRevision, needsTimeCorrection } from "@/lib/video-sync";
 import type { ClientToServerEvents, ServerToClientEvents, VideoState } from "@/types/realtime";
 
 export function useVideoSync({ videoRef, isHost, canControl = true, socket, videoState }: {
@@ -53,9 +53,13 @@ export function useVideoSync({ videoRef, isHost, canControl = true, socket, vide
   const emit = useCallback((action: "play" | "pause" | "seek") => {
     const video = videoRef.current;
     if (!video || !canControl) return;
-    if ((action === "play" || action === "pause") && !shouldEmitPlaybackAction(action, desiredPlaying.current, applyingRemote.current)) return;
+    const intent = action === "play" || action === "pause"
+      ? getLocalPlaybackIntent(action, desiredPlaying.current)
+      : null;
+    if (intent && !intent.shouldEmit) return;
     if (action === "seek" && applyingRemote.current) return;
     socket.emit("video:action", { action, currentTime: video.currentTime });
+    if (intent) desiredPlaying.current = intent.desiredPlaying;
   }, [canControl, socket, videoRef]);
 
   useEffect(() => {

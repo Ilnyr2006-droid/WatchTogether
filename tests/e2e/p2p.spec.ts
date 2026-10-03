@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { createClients, createRoom, getInvitation, joinRoom } from "./helpers";
+import { createClients, createRoom, disconnectSocket, getInvitation, joinRoom, participantSnapshot, reconnectSocket } from "./helpers";
 
 test("Host transfers the local MP4 to two Guests over P2P without external ICE", async ({ browser, baseURL }) => {
   test.setTimeout(90_000);
@@ -99,6 +99,30 @@ test("Host transfers the local MP4 to two Guests over P2P without external ICE",
         ]));
       }
     }
+
+    const guestAId = (await participantSnapshot(guestA.page)).find((person) => person.name === guestA.name)?.id;
+    const guestABytes = Number(await guestA.page.getByTestId("p2p-transferred-bytes").getAttribute("data-bytes"));
+    const guestAPeerCount = diagnostics[1]?.peers?.length ?? 0;
+    const hostPeerCount = diagnostics[0]?.peers?.length ?? 0;
+    await disconnectSocket(guestA.page);
+    await reconnectSocket(guestA.page);
+    await expect.poll(async () => {
+      const people = await participantSnapshot(host.page);
+      return people.find((person) => person.name === guestA.name);
+    }, { timeout: 15_000 }).toEqual(expect.objectContaining({ id: guestAId, connected: true }));
+    await expect(host.page.getByTestId("participant-count")).toHaveText("3");
+    await expect.poll(async () => {
+      const current = await currentP2PDiagnostics();
+      return current[1]?.peers?.slice(guestAPeerCount).some((peer) => peer.connection === "connected") ?? false;
+    }, { timeout: 30_000 }).toBe(true);
+    await expect.poll(async () => {
+      const current = await currentP2PDiagnostics();
+      return current[0]?.peers?.slice(hostPeerCount).some((peer) => peer.connection === "connected") ?? false;
+    }, { timeout: 30_000 }).toBe(true);
+    await expect.poll(async () => Number(await guestA.page.getByTestId("p2p-transferred-bytes").getAttribute("data-bytes")), { timeout: 30_000 }).toBeGreaterThan(guestABytes);
+    const guestAAfterReconnect = (await participantSnapshot(guestA.page)).filter((person) => person.id === guestAId);
+    expect(guestAAfterReconnect).toHaveLength(1);
+    expect(guestAAfterReconnect[0]).toMatchObject({ connected: true, isHost: false });
 
     await clients.assertNoBrowserErrors();
   } finally {

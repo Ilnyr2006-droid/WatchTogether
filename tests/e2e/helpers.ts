@@ -181,3 +181,62 @@ export async function trackVideoActionEmits(page: Page) {
 export async function videoActionEmitCount(page: Page) {
   return page.evaluate(() => (window as Window & { __videoActionEmits?: number }).__videoActionEmits ?? 0);
 }
+
+export async function delayVideoActionTransport(page: Page, delayMs = 250) {
+  await page.evaluate((delay) => {
+    const target = window as Window & {
+      __watchTogetherSocket?: { emit: (event: string, ...args: unknown[]) => unknown };
+    };
+    const socket = target.__watchTogetherSocket;
+    if (!socket) throw new Error("E2E socket hook is unavailable");
+    const originalEmit = socket.emit.bind(socket);
+    const queue: Array<{ event: string; args: unknown[] }> = [];
+    let timer: number | undefined;
+    socket.emit = (event, ...args) => {
+      if (event !== "video:action") return originalEmit(event, ...args);
+      queue.push({ event, args });
+      if (timer === undefined) {
+        timer = window.setTimeout(() => {
+          timer = undefined;
+          for (const item of queue.splice(0)) originalEmit(item.event, ...item.args);
+        }, delay);
+      }
+      return socket;
+    };
+  }, delayMs);
+}
+
+export async function disconnectSocket(page: Page) {
+  await page.evaluate(() => {
+    const socket = (window as Window & { __watchTogetherSocket?: { disconnect: () => void } }).__watchTogetherSocket;
+    if (!socket) throw new Error("E2E socket hook is unavailable");
+    socket.disconnect();
+  });
+  await expect.poll(() => page.evaluate(() => !(window as Window & { __watchTogetherSocket?: { connected: boolean } }).__watchTogetherSocket?.connected)).toBe(true);
+}
+
+export async function reconnectSocket(page: Page) {
+  await page.evaluate(async () => {
+    const socket = (window as Window & { __watchTogetherSocket?: {
+      connected: boolean;
+      connect: () => void;
+      on: (event: "connect", listener: () => void) => void;
+      off: (event: "connect", listener: () => void) => void;
+    } }).__watchTogetherSocket;
+    if (!socket) throw new Error("E2E socket hook is unavailable");
+    if (socket.connected) return;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        socket.off("connect", onConnect);
+        reject(new Error("Socket.IO reconnect timed out"));
+      }, 20_000);
+      const onConnect = () => {
+        window.clearTimeout(timeout);
+        socket.off("connect", onConnect);
+        resolve();
+      };
+      socket.on("connect", onConnect);
+      socket.connect();
+    });
+  });
+}

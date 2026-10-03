@@ -303,7 +303,11 @@ export default function RoomPage() {
               <p className="mt-1 text-xs text-slate-600">
                 {isHost
                   ? "Вы управляете просмотром"
-                  : "Просмотром управляет Host"}
+                  : room.controlMode === "everyone"
+                    ? "Вы можете управлять просмотром"
+                    : room.controlMode === "approved" && canControl
+                      ? "Вам разрешено управлять просмотром"
+                      : "Просмотром управляет Host"}
               </p>
             </div>
             <VoiceControls voice={voice} />

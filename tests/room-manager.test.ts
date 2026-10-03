@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { effectiveVideoTime } from "@/lib/video-sync";
 import { RoomManager } from "@/server/room-manager";
 
 describe("RoomManager", () => {
@@ -42,11 +43,28 @@ describe("RoomManager", () => {
     const manager = new RoomManager();
     const room = manager.create("owner", "Owner");
     const ownerCredentials = manager.getCredentials("owner")!;
-    manager.join(room.id, "guest", "Guest", ownerCredentials.roomToken);
+    const guest = manager.join(room.id, "guest", "Guest", ownerCredentials.roomToken)!;
     manager.leave("owner");
+    expect(manager.get(room.id)?.hostId).toBe(guest.participantId);
     const returned = manager.join(room.id, "owner-returned", "Owner", ownerCredentials.roomToken, { ownerToken: ownerCredentials.ownerToken })!;
     expect(returned.room.hostId).toBe(returned.participantId);
     expect(returned.room.participants.filter((person) => person.id === returned.participantId)).toHaveLength(1);
+    expect(returned.room.participants).toHaveLength(2);
+  });
+
+  it("does not allow a removed participant's expired session to rejoin as a duplicate", () => {
+    const manager = new RoomManager();
+    const room = manager.create("host", "Host");
+    const roomToken = manager.getCredentials("host")!.roomToken;
+    const joined = manager.join(room.id, "guest", "Guest", roomToken)!;
+    const credentials = manager.getCredentials("guest")!;
+    manager.leave("guest");
+    expect(manager.join(room.id, "guest-returned", "Guest", roomToken, {
+      participantId: credentials.participantId,
+      sessionToken: credentials.sessionToken,
+    })).toBeNull();
+    expect(manager.get(room.id)?.participants).toHaveLength(1);
+    expect(joined.participantId).toBe(credentials.participantId);
   });
 
   it("transfers host role and deletes an empty room on explicit leave", () => {
@@ -114,6 +132,30 @@ describe("RoomManager", () => {
     expect(manager.canControlPlayback("host")).toBe(true);
   });
 
+  it("retains approved grants across modes but clears pending requests", () => {
+    const manager = new RoomManager();
+    const room = manager.create("host", "Host");
+    const token = manager.getCredentials("host")!.roomToken;
+    const guestA = manager.join(room.id, "guest-a", "Guest A", token)!.participantId;
+    const guestB = manager.join(room.id, "guest-b", "Guest B", token)!.participantId;
+
+    manager.setControlMode("host", "approved");
+    manager.requestControl("guest-a");
+    manager.decideControl("host", guestA, "approve");
+    manager.requestControl("guest-b");
+    expect(manager.get(room.id)?.controlRequests).toContain(guestB);
+
+    const hostOnly = manager.setControlMode("host", "host-only")!;
+    expect(hostOnly.controlRequests).toEqual([]);
+    expect(hostOnly.approvedControllerIds).toContain(guestA);
+    expect(manager.canControlPlayback("guest-a")).toBe(false);
+
+    const approvedAgain = manager.setControlMode("host", "approved")!;
+    expect(approvedAgain.approvedControllerIds).toContain(guestA);
+    expect(approvedAgain.controlRequests).toEqual([]);
+    expect(manager.canControlPlayback("guest-a")).toBe(true);
+  });
+
   it("rejects Guest mode changes and always keeps host-stream sources Host-only", () => {
     const manager = new RoomManager();
     const room = manager.create("host", "Host");
@@ -159,6 +201,28 @@ describe("RoomManager", () => {
     }
     expect(manager.clearSource(room.id, participantId)?.revision).toBe(++revision);
     expect(manager.get(room.id)?.video.updatedBy).toBe(participantId);
+  });
+
+  it("rebases snapshot playhead and timestamp without changing video revision", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      const manager = new RoomManager();
+      const room = manager.create("host", "Host");
+      manager.setSource("host", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" });
+      manager.updateVideo("host", "play", 20);
+
+      vi.setSystemTime(15_000);
+      const lateJoinSnapshot = manager.get(room.id)!;
+      expect(lateJoinSnapshot.video).toMatchObject({ currentTime: 25, updatedAt: 15_000, playing: true, revision: 2 });
+      expect(effectiveVideoTime(lateJoinSnapshot.video, 15_000)).toBe(25);
+
+      vi.setSystemTime(17_000);
+      const laterSnapshot = manager.get(room.id)!;
+      expect(laterSnapshot.video).toMatchObject({ currentTime: 27, updatedAt: 17_000, revision: 2 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("serializes rapid actions from different participants into one final authoritative state", () => {

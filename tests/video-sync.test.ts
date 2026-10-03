@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectiveVideoTime, isNewerVideoRevision, needsTimeCorrection, shouldEmitPlaybackAction } from "@/lib/video-sync";
+import { effectiveVideoTime, getLocalPlaybackIntent, isNewerVideoRevision, needsTimeCorrection } from "@/lib/video-sync";
 
 describe("video synchronization", () => {
   it("accounts for elapsed server time while playing", () => {
@@ -21,10 +21,23 @@ describe("video synchronization", () => {
     expect(isNewerVideoRevision(4, 3)).toBe(false);
   });
 
-  it("suppresses playback events caused while applying remote state", () => {
-    expect(shouldEmitPlaybackAction("pause", false, true)).toBe(false);
-    expect(shouldEmitPlaybackAction("play", false, true)).toBe(false);
-    expect(shouldEmitPlaybackAction("pause", false, false)).toBe(false);
-    expect(shouldEmitPlaybackAction("play", false, false)).toBe(true);
+  it("suppresses remote playback echoes by desired state without blocking a new local intent", () => {
+    expect(getLocalPlaybackIntent("pause", false).shouldEmit).toBe(false);
+    expect(getLocalPlaybackIntent("play", true).shouldEmit).toBe(false);
+    expect(getLocalPlaybackIntent("play", false).shouldEmit).toBe(true);
+  });
+
+  it("updates local playback intent across rapid play-pause-play events", () => {
+    let desiredPlaying: boolean | null = false;
+    for (const action of ["play", "pause", "play"] as const) {
+      const intent = getLocalPlaybackIntent(action, desiredPlaying);
+      expect(intent.shouldEmit).toBe(true);
+      desiredPlaying = intent.desiredPlaying;
+    }
+    expect(desiredPlaying).toBe(true);
+
+    const remotePause = getLocalPlaybackIntent("pause", false);
+    expect(remotePause.shouldEmit).toBe(false);
+    expect(remotePause.desiredPlaying).toBe(false);
   });
 });
