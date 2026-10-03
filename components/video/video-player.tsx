@@ -35,6 +35,7 @@ const choices: { value: SourceChoice; label: string }[] = [
 export function VideoPlayer({
   socket,
   isHost,
+  canControl,
   hostId,
   participants,
   video,
@@ -43,6 +44,7 @@ export function VideoPlayer({
 }: {
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
   isHost: boolean;
+  canControl: boolean;
   video: VideoState;
   roomId: string;
   streamToken: string;
@@ -71,7 +73,7 @@ export function VideoPlayer({
 
   function submitUrl(event: FormEvent) {
     event.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || !canControl) return;
     setLoading(true);
     setSourceError("");
     socket.emit("video:set-source", { input: input.trim() });
@@ -217,6 +219,7 @@ export function VideoPlayer({
 
   return (
     <section className="panel overflow-hidden">
+      <output className="sr-only" data-testid="video-state" data-revision={video.revision} data-playing={video.playing} data-time={video.currentTime} />
       {video.source?.provider === "rutube" ? (
         <RutubePlayer
           key={
@@ -224,6 +227,7 @@ export function VideoPlayer({
           }
           socket={socket}
           isHost={isHost}
+          canControl={canControl}
           video={video}
           source={video.source}
         />
@@ -233,6 +237,7 @@ export function VideoPlayer({
           key={video.source.sourceId}
           socket={socket}
           isHost={isHost}
+          canControl={canControl}
           hostId={hostId}
           participants={participants}
           video={video}
@@ -242,6 +247,7 @@ export function VideoPlayer({
         <Html5Player
           socket={socket}
           isHost={isHost}
+          canControl={canControl}
           video={video}
           localUrl={localUrl}
           localFileName={localFileName}
@@ -260,7 +266,7 @@ export function VideoPlayer({
             {publicSourceLabel(video.source)}
           </span>
         </div>
-        {(isHost ? choices : choices.filter((item) => item.value === "rutube" || item.value === "url")).length > 0 && (
+        {canControl && (isHost ? choices : choices.filter((item) => item.value === "rutube" || item.value === "url")).length > 0 && (
           <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
             {(isHost ? choices : choices.filter((item) => item.value === "rutube" || item.value === "url")).map((item) => (
               <button
@@ -277,7 +283,7 @@ export function VideoPlayer({
             ))}
           </div>
         )}
-        {(choice === "rutube" || choice === "url") && (
+        {canControl && (choice === "rutube" || choice === "url") && (
           <form
             className="flex flex-col gap-2 sm:flex-row"
             onSubmit={submitUrl}
@@ -441,11 +447,12 @@ export function VideoPlayer({
             {sourceError}
           </p>
         )}
-        {!isHost && (
+        {!isHost && canControl && (
           <p className="mt-2 text-xs text-slate-500">
             Вы можете менять ссылку и управлять воспроизведением.
           </p>
         )}
+        {!canControl && <p className="mt-2 text-xs text-amber-300">Ожидается разрешение Host на управление видео.</p>}
       </div>
     </section>
   );

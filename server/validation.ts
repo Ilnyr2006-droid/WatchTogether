@@ -20,8 +20,12 @@ export const roomJoinSchema = z
     username: usernameSchema,
     roomToken: roomTokenSchema,
     ownerToken: roomTokenSchema.optional(),
+    participantId: z.string().regex(/^[a-f0-9]{32}$/).optional(),
+    sessionToken: roomTokenSchema.optional(),
   })
   .strict();
+export const roomControlModeSchema = z.object({ mode: z.enum(["everyone", "host-only", "approved"]) }).strict();
+export const roomControlDecisionSchema = z.object({ participantId: z.string().regex(/^[a-f0-9]{32}$/), approved: z.boolean() }).strict();
 export const participantUpdateSchema = z
   .object({ muted: z.boolean().optional(), ready: z.boolean().optional() })
   .strict()

@@ -125,9 +125,9 @@ export function useP2PMovie({
     (start: number) => {
       if (isHost || pendingRequest.current) return;
       const host = participants.find(
-        (participant) => participant.socketId === hostId,
+        (participant) => participant.id === hostId && participant.connected && participant.socketId,
       );
-      const context = host ? peers.current.get(host.socketId) : undefined;
+      const context = host?.socketId ? peers.current.get(host.socketId) : undefined;
       if (
         !context?.control ||
         context.control.readyState !== "open" ||
@@ -467,15 +467,22 @@ export function useP2PMovie({
   useEffect(() => {
     const ids = new Set(
       participants
-        .filter((participant) => participant.socketId !== socket.id)
-        .map((participant) => participant.socketId),
+        .filter((participant) => participant.connected && participant.socketId && participant.socketId !== socket.id)
+        .map((participant) => participant.socketId!),
     );
     peers.current.forEach((_context, id) => {
       if (!ids.has(id)) cleanupPeer(id);
     });
     if (isHost && file) ids.forEach((id) => createPeer(id));
-    if (!isHost && hostId !== socket.id && ids.has(hostId)) createPeer(hostId);
+    const hostSocketId = participants.find((participant) => participant.id === hostId && participant.connected)?.socketId;
+    if (!isHost && hostSocketId && hostSocketId !== socket.id && ids.has(hostSocketId)) createPeer(hostSocketId);
   }, [cleanupPeer, createPeer, file, hostId, isHost, participants, socket.id]);
+
+  useEffect(() => {
+    const closeStalePeers = () => peers.current.forEach((_context, id) => cleanupPeer(id));
+    socket.on("disconnect", closeStalePeers);
+    return () => { socket.off("disconnect", closeStalePeers); };
+  }, [cleanupPeer, socket]);
 
   useEffect(() => {
     if (isHost) return;

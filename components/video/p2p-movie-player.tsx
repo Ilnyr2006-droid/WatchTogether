@@ -15,6 +15,7 @@ import type {
 export function P2PMoviePlayer({
   socket,
   isHost,
+  canControl,
   hostId,
   participants,
   video,
@@ -22,6 +23,7 @@ export function P2PMoviePlayer({
 }: {
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
   isHost: boolean;
+  canControl: boolean;
   hostId: string;
   participants: Participant[];
   video: VideoState;
@@ -42,7 +44,7 @@ export function P2PMoviePlayer({
     file,
     videoRef,
   });
-  const sync = useVideoSync({ videoRef, socket, isHost, videoState: video });
+  const sync = useVideoSync({ videoRef, socket, isHost, canControl, videoState: video });
 
   useEffect(() => {
     if (!isHost || !file || !videoRef.current) return;
@@ -64,7 +66,7 @@ export function P2PMoviePlayer({
       <div className="relative aspect-video">
         <video
           ref={videoRef}
-          controls
+          controls={canControl}
           playsInline
           preload="metadata"
           className="h-full w-full"

@@ -17,6 +17,8 @@ import {
   signalDescriptionSchema,
   videoActionSchema,
   videoSourceSelectionSchema,
+  roomControlModeSchema,
+  roomControlDecisionSchema,
 } from "./validation";
 import { parseSubmittedVideoUrl } from "@/lib/video-source";
 import type {
@@ -51,7 +53,7 @@ export function attachSocketServer(
   const movieDescriptionRate = new RateLimiter(20, 10_000);
   const movieCandidateRate = new RateLimiter(250, 10_000);
   const failedJoinRate = new FailedAttemptLimiter(8, 60_000);
-  const pendingDisconnectLeaves = new Map<string, ReturnType<typeof setTimeout>>();
+  const pendingDisconnectLeaves = new Map<string, { roomId: string; timer: ReturnType<typeof setTimeout> }>();
 
   io.on("connection", (socket) => {
     const fail = (message: string, code = "INVALID_REQUEST") =>
@@ -65,20 +67,16 @@ export function attachSocketServer(
       const room = rooms.create(socket.id, parsed.data.username);
       const roomToken = rooms.getRoomTokenForHost(socket.id);
       const ownerToken = rooms.getOwnerTokenForHost(socket.id);
-      if (!roomToken || !ownerToken)
+      const credentials = rooms.getCredentials(socket.id);
+      if (!roomToken || !ownerToken || !credentials)
         return ack({ ok: false, error: "Не удалось защитить комнату" });
-      socket.data = { roomId: room.id, username: parsed.data.username };
+      socket.data = { roomId: room.id, username: parsed.data.username, participantId: credentials.participantId };
       socket.join(room.id);
-      ack({ ok: true, data: { roomId: room.id, roomToken, ownerToken } });
+      ack({ ok: true, data: { roomId: room.id, roomToken, ownerToken, participantId: credentials.participantId, sessionToken: credentials.sessionToken } });
       socket.emit("room:state", room);
     });
 
     socket.on("room:join", (payload, ack) => {
-      const pendingLeave = pendingDisconnectLeaves.get(socket.id);
-      if (pendingLeave) {
-        clearTimeout(pendingLeave);
-        pendingDisconnectLeaves.delete(socket.id);
-      }
       const attemptKey = socket.handshake.address || "unknown";
       if (failedJoinRate.isBlocked(attemptKey))
         return ack({
@@ -95,14 +93,14 @@ export function attachSocketServer(
       }
       if (socket.data.roomId && socket.data.roomId !== parsed.data.roomId)
         leaveCurrent();
-      const state = rooms.join(
+      const joined = rooms.join(
         parsed.data.roomId,
         socket.id,
         parsed.data.username,
         parsed.data.roomToken,
-        parsed.data.ownerToken,
+        { ownerToken: parsed.data.ownerToken, participantId: parsed.data.participantId, sessionToken: parsed.data.sessionToken },
       );
-      if (!state) {
+      if (!joined) {
         failedJoinRate.recordFailure(attemptKey);
         return ack({
           ok: false,
@@ -110,24 +108,44 @@ export function attachSocketServer(
         });
       }
       failedJoinRate.clear(attemptKey);
+      const { room: state, participantId } = joined;
+      const pendingLeave = pendingDisconnectLeaves.get(participantId);
+      if (pendingLeave) { clearTimeout(pendingLeave.timer); pendingDisconnectLeaves.delete(participantId); }
       socket.data = {
         roomId: parsed.data.roomId,
         username: parsed.data.username,
+        participantId,
       };
       socket.join(parsed.data.roomId);
       const streamToken = rooms.issueStreamToken(socket.id);
       if (!streamToken)
         return ack({ ok: false, error: "Не удалось создать сессию комнаты" });
-      ack({ ok: true, data: { room: state, streamToken } });
+      ack({ ok: true, data: { room: state, streamToken, participantId, sessionToken: joined.sessionToken } });
       socket.emit("room:state", state);
-      const participant = state.participants.find(
-        (item) => item.socketId === socket.id,
-      );
-      if (participant)
-        socket.to(parsed.data.roomId).emit("participant:joined", participant);
+      socket.to(parsed.data.roomId).emit("room:state", state);
+      if (joined.replacedSocketId) io.sockets.sockets.get(joined.replacedSocketId)?.disconnect(true);
     });
 
-    socket.on("room:leave", leaveCurrent);
+    socket.on("room:leave", (ack) => { leaveCurrent(); ack?.({ ok: true, data: undefined }); });
+
+    socket.on("room:control-mode", (payload) => {
+      const parsed = roomControlModeSchema.safeParse(payload);
+      if (!parsed.success) return;
+      const state = rooms.setControlMode(socket.id, parsed.data.mode);
+      if (!state) return fail("Только Host может менять режим управления", "FORBIDDEN");
+      io.to(state.id).emit("room:state", state);
+    });
+    socket.on("room:control-request", () => {
+      const state = rooms.requestControl(socket.id);
+      if (state) io.to(state.id).emit("room:state", state);
+    });
+    socket.on("room:control-decision", (payload) => {
+      const parsed = roomControlDecisionSchema.safeParse(payload);
+      if (!parsed.success) return;
+      const state = rooms.decideControl(socket.id, parsed.data.participantId, parsed.data.approved);
+      if (!state) return fail("Только Host может выдавать разрешения", "FORBIDDEN");
+      io.to(state.id).emit("room:state", state);
+    });
 
     socket.on("participant:update", (payload) => {
       if (!participantRate.allow(socket.id)) return;
@@ -166,7 +184,7 @@ export function attachSocketServer(
       if (!source)
         return fail("Некорректный источник видео", "INVALID_VIDEO_SOURCE");
       const video = rooms.setSource(socket.id, source);
-      if (!video) return fail("Только host может менять видео", "FORBIDDEN");
+      if (!video) return fail("Нет разрешения менять этот источник видео", "FORBIDDEN");
       if (socket.data.roomId) {
         streams.clear(socket.data.roomId);
         io.to(socket.data.roomId).emit("video:state", video);
@@ -275,15 +293,16 @@ export function attachSocketServer(
 
     function leaveCurrent() {
       const current = rooms.getBySocket(socket.id);
+      const participantId = rooms.getParticipantId(socket.id);
       streams.closeParticipant(socket.id);
       const stopsHostMedia =
-        current?.hostId === socket.id &&
+        current?.hostId === participantId &&
         current.video.source?.provider === "html5" &&
         (current.video.source.mode === "host-stream" ||
           current.video.source.mode === "p2p-movie");
       if (current && stopsHostMedia) {
         streams.clear(current.id);
-        const stoppedVideo = rooms.clearSource(current.id);
+        const stoppedVideo = rooms.clearSource(current.id, participantId ?? null);
         if (stoppedVideo) io.to(current.id).emit("video:state", stoppedVideo);
         socket
           .to(current.id)
@@ -296,30 +315,45 @@ export function attachSocketServer(
       }
       const result = rooms.leave(socket.id);
       if (!result) return;
+      if (participantId) {
+        const pending = pendingDisconnectLeaves.get(participantId);
+        if (pending) { clearTimeout(pending.timer); pendingDisconnectLeaves.delete(participantId); }
+      }
       if (!result.hostId) streams.clear(result.roomId);
       socket.leave(result.roomId);
       socket.data.roomId = undefined;
+      socket.data.participantId = undefined;
       io.to(result.roomId).emit("participant:left", {
-        socketId: socket.id,
+        participantId: result.participantId,
         hostId: result.hostId,
       });
-      if (result.hostId) {
-        const state = rooms.get(result.roomId);
-        if (state) io.to(result.roomId).emit("room:state", state);
-      }
+      const state = rooms.get(result.roomId);
+      if (state) io.to(result.roomId).emit("room:state", state);
     }
 
     socket.on("disconnect", () => {
-      // A browser refresh creates a new Socket.IO connection. Keep this
-      // socket in the room briefly so the refreshed page can join again
-      // instead of deleting the room or immediately transferring the host.
-      if (rooms.getBySocket(socket.id)) {
+      const disconnected = rooms.disconnect(socket.id);
+      if (disconnected) {
+        const { room, participant } = disconnected;
         streams.closeParticipant(socket.id);
         const timer = setTimeout(() => {
-          pendingDisconnectLeaves.delete(socket.id);
-          leaveCurrent();
+          pendingDisconnectLeaves.delete(participant.id);
+          const current = rooms.get(room.id);
+          const source = current?.video.source;
+          if (current?.hostId === participant.id && source?.provider === "html5" && (source.mode === "host-stream" || source.mode === "p2p-movie")) {
+            streams.clear(room.id);
+            const stoppedVideo = rooms.clearSource(room.id, participant.id);
+            if (stoppedVideo) io.to(room.id).emit("video:state", stoppedVideo);
+            io.to(room.id).emit("room:error", { code: "HOST_STREAM_STOPPED", message: source.mode === "p2p-movie" ? "Host не переподключился. P2P-передача фильма остановлена." : "Host не переподключился. Трансляция фильма остановлена." });
+          }
+          const result = rooms.leaveParticipant(room.id, participant.id);
+          if (!result) return;
+          if (!result.hostId) streams.clear(room.id);
+          io.to(room.id).emit("participant:left", { participantId: result.participantId, hostId: result.hostId });
+          const next = rooms.get(room.id);
+          if (next) io.to(room.id).emit("room:state", next);
         }, 30_000);
-        pendingDisconnectLeaves.set(socket.id, timer);
+        pendingDisconnectLeaves.set(participant.id, { roomId: room.id, timer });
       }
       chatRate.clear(socket.id);
       participantRate.clear(socket.id);

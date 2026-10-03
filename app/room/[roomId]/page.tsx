@@ -10,6 +10,7 @@ import { VideoPlayer } from "@/components/video/video-player";
 import { useSocket } from "@/hooks/use-socket";
 import { useVoiceChat } from "@/hooks/use-voice-chat";
 import { VoiceControls } from "@/components/voice/voice-controls";
+import { ControlSettings } from "@/components/room/control-settings";
 import type { Participant, RoomState, VideoState } from "@/types/realtime";
 
 export default function RoomPage() {
@@ -21,6 +22,7 @@ export default function RoomPage() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [streamToken, setStreamToken] = useState("");
+  const [participantId, setParticipantId] = useState("");
   const username =
     typeof window === "undefined"
       ? ""
@@ -63,7 +65,11 @@ export default function RoomPage() {
     if (!roomToken) return;
     socket.emit(
       "room:join",
-      { roomId: params.roomId, username, roomToken, ownerToken: ownerToken || undefined },
+      {
+        roomId: params.roomId, username, roomToken, ownerToken: ownerToken || undefined,
+        participantId: sessionStorage.getItem(`watchtogether:participant-id:${params.roomId}`) || undefined,
+        sessionToken: sessionStorage.getItem(`watchtogether:session-token:${params.roomId}`) || undefined,
+      },
       (response) => {
         if (response.ok) {
           sessionStorage.setItem(
@@ -72,6 +78,11 @@ export default function RoomPage() {
           );
           setRoom(response.data.room);
           setStreamToken(response.data.streamToken);
+          setParticipantId(response.data.participantId);
+          sessionStorage.setItem(`watchtogether:participant-id:${params.roomId}`, response.data.participantId);
+          sessionStorage.setItem(`watchtogether:session-token:${params.roomId}`, response.data.sessionToken);
+          if (response.data.room.hostId === response.data.participantId && ownerToken)
+            sessionStorage.setItem(`watchtogether:owner-token:${params.roomId}`, ownerToken);
           setError("");
         } else setError(response.error);
       },
@@ -79,9 +90,9 @@ export default function RoomPage() {
   }, [connected, ownerToken, params.roomId, roomToken, router, socket, username]);
 
   useEffect(() => {
-    const state = (next: RoomState) => setRoom(next);
+    const state = (next: RoomState) => setRoom((current) => current && next.video.revision < current.video.revision ? { ...next, video: current.video } : next);
     const videoState = (video: VideoState) =>
-      setRoom((current) => (current ? { ...current, video } : current));
+      setRoom((current) => current && video.revision >= current.video.revision ? { ...current, video } : current);
     const joined = (participant: Participant) =>
       setRoom((current) =>
         current
@@ -89,7 +100,7 @@ export default function RoomPage() {
               ...current,
               participants: [
                 ...current.participants.filter(
-                  (p) => p.socketId !== participant.socketId,
+                  (p) => p.id !== participant.id,
                 ),
                 participant,
               ],
@@ -102,16 +113,16 @@ export default function RoomPage() {
           ? {
               ...current,
               participants: current.participants.map((p) =>
-                p.socketId === participant.socketId ? participant : p,
+                p.id === participant.id ? participant : p,
               ),
             }
           : current,
       );
     const left = ({
-      socketId,
+      participantId: leftParticipantId,
       hostId,
     }: {
-      socketId: string;
+      participantId: string;
       hostId: string | null;
     }) =>
       setRoom((current) =>
@@ -120,7 +131,7 @@ export default function RoomPage() {
               ...current,
               hostId: hostId ?? current.hostId,
               participants: current.participants.filter(
-                (p) => p.socketId !== socketId,
+                (p) => p.id !== leftParticipantId,
               ),
             }
           : current,
@@ -150,13 +161,26 @@ export default function RoomPage() {
     window.setTimeout(() => setCopied(false), 1800);
   };
   const leave = () => {
-    socket.emit("room:leave");
+    let navigated = false;
+    const finish = () => {
+      if (navigated) return;
+      navigated = true;
+      sessionStorage.removeItem(`watchtogether:participant-id:${params.roomId}`);
+      sessionStorage.removeItem(`watchtogether:session-token:${params.roomId}`);
+      router.push("/");
+    };
+    socket.emit("room:leave", finish);
+    window.setTimeout(finish, 750);
   };
   const goHome = () => {
     socket.emit("room:leave");
     sessionStorage.removeItem(`watchtogether:room-token:${params.roomId}`);
     sessionStorage.removeItem(`watchtogether:invitation:${params.roomId}`);
     sessionStorage.removeItem(`watchtogether:owner-token:${params.roomId}`);
+    sessionStorage.removeItem(`watchtogether:participant-id:${params.roomId}`);
+    sessionStorage.removeItem(`watchtogether:session-token:${params.roomId}`);
+    sessionStorage.removeItem(`watchtogether:participant-id:${params.roomId}`);
+    sessionStorage.removeItem(`watchtogether:session-token:${params.roomId}`);
   };
 
   if (!room) {
@@ -194,7 +218,8 @@ export default function RoomPage() {
     );
   }
 
-  const isHost = room.hostId === socket.id;
+  const isHost = room.hostId === participantId;
+  const canControl = isHost || room.controlMode === "everyone" || (room.controlMode === "approved" && room.approvedControllerIds.includes(participantId));
   return (
     <main className="min-h-screen px-4 py-4 sm:px-6 lg:px-8">
       <header className="mx-auto mb-5 flex max-w-[1600px] flex-wrap items-center justify-between gap-3">
@@ -220,16 +245,14 @@ export default function RoomPage() {
               {copied ? "Скопировано" : "Пригласить"}
             </span>
           </button>
-          {/* A full reload guarantees all room and WebRTC state is discarded. */}
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a
-            href="/"
+          <button
+            type="button"
             className="button-secondary py-2 text-sm text-red-300"
             onClick={leave}
           >
             <LogOut className="size-4" />
             <span className="hidden sm:inline">Выйти</span>
-          </a>
+          </button>
         </div>
       </header>
       {error && (
@@ -247,6 +270,7 @@ export default function RoomPage() {
           <VideoPlayer
             socket={socket}
             isHost={isHost}
+            canControl={canControl}
             hostId={room.hostId}
             participants={room.participants}
             video={room.video}
@@ -288,10 +312,11 @@ export default function RoomPage() {
           <Participants
             participants={room.participants}
             hostId={room.hostId}
-            currentSocketId={socket.id}
+            currentParticipantId={participantId}
             voiceStates={voice.peerStates}
             speaking={voice.speaking}
           />
+          <ControlSettings socket={socket} room={room} participantId={participantId} isHost={isHost} canControl={canControl} />
           <ChatPanel socket={socket} initialMessages={room.messages} />
         </aside>
       </div>

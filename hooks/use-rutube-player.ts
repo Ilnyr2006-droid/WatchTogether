@@ -22,10 +22,11 @@ function readMessage(value: unknown): RutubeMessage | null {
   } catch { return null; }
 }
 
-export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
+export function useRutubePlayer({ iframeRef, socket, isHost, canControl, video }: {
   iframeRef: RefObject<HTMLIFrameElement | null>;
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
   isHost: boolean;
+  canControl: boolean;
   video: VideoState;
 }) {
   const [status, setStatus] = useState<RutubePlayerStatus>("loading");
@@ -109,7 +110,7 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
           const expected = previous.time + (playingRef.current ? (now - previous.at) / 1000 : 0);
           if (Math.abs(time - expected) > 1.1 && now - lastSeekEmitRef.current > 700) {
             lastSeekEmitRef.current = now;
-            socket.emit("video:action", { action: "seek", currentTime: time });
+            if (canControl) socket.emit("video:action", { action: "seek", currentTime: time });
           }
         }
         lastSampleRef.current = { time, at: now };
@@ -120,7 +121,7 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
         if (state !== "playing" && state !== "pause" && state !== "paused" && state !== "stopped") return;
         const normalized = state === "playing" ? "playing" : "paused";
         playingRef.current = normalized === "playing";
-        if (!advertisingRef.current && Date.now() >= suppressUntilRef.current && lastStateEmitRef.current !== normalized) {
+        if (canControl && !advertisingRef.current && Date.now() >= suppressUntilRef.current && lastStateEmitRef.current !== normalized) {
           lastStateEmitRef.current = normalized;
           socket.emit("video:action", { action: normalized === "playing" ? "play" : "pause", currentTime: currentTimeRef.current });
         }
@@ -128,15 +129,15 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [applyRemoteState, command, iframeRef, socket]);
+  }, [applyRemoteState, canControl, command, iframeRef, socket]);
 
   useEffect(() => {
-    if (!isHost) return;
+    if (!isHost || !canControl) return;
     const timer = window.setInterval(() => {
       if (readyRef.current && playingRef.current && !advertisingRef.current) socket.emit("video:action", { action: "sync", currentTime: currentTimeRef.current });
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [isHost, socket]);
+  }, [canControl, isHost, socket]);
 
   const changeVideo = useCallback((nextVideoId: string) => command({ type: "player:changeVideo", data: { id: nextVideoId } }), [command]);
   return { status, ready: status === "ready", advertising, duration, command, changeVideo };

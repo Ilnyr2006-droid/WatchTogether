@@ -245,7 +245,7 @@ export function useVoiceChat(socket: Socket<ServerToClientEvents, ClientToServer
   }, [ensurePeer, setPeerState, socket]);
 
   useEffect(() => {
-    const reconciliation = reconcilePeerIds(peersRef.current.keys(), participants.map((participant) => participant.socketId), socket.id);
+    const reconciliation = reconcilePeerIds(peersRef.current.keys(), participants.flatMap((participant) => participant.connected && participant.socketId ? [participant.socketId] : []), socket.id);
     reconciliation.remove.forEach((id) => cleanupPeer(id));
     setPeerStates((current) => Object.fromEntries(Object.entries(current).filter(([id]) => reconciliation.active.has(id))));
     if (streamRef.current) reconciliation.create.forEach((id) => ensurePeer(id));
@@ -255,7 +255,7 @@ export function useVoiceChat(socket: Socket<ServerToClientEvents, ClientToServer
   useEffect(() => {
     const cleanupAll = () => {
       peersRef.current.forEach((_, id) => cleanupPeer(id, true));
-      setPeerStates(Object.fromEntries(participantsRef.current.filter((participant) => participant.socketId !== socket.id).map((participant) => [participant.socketId, "reconnecting" as const])));
+      setPeerStates(Object.fromEntries(participantsRef.current.filter((participant) => participant.connected && participant.socketId && participant.socketId !== socket.id).map((participant) => [participant.socketId!, "reconnecting" as const])));
     };
     const onDisconnect = () => { cleanupAll(); localSpeakingCleanupRef.current?.(); localSpeakingCleanupRef.current = null; };
     const onConnect = () => {
@@ -329,7 +329,7 @@ export function useVoiceChat(socket: Socket<ServerToClientEvents, ClientToServer
         const stream = await requestMicrophone(selectedDeviceId || undefined);
         attachLocalStream(stream);
         await refreshDevices();
-        participantsRef.current.filter((participant) => participant.socketId !== socket.id).forEach((participant) => ensurePeer(participant.socketId));
+        participantsRef.current.filter((participant) => participant.connected && participant.socketId && participant.socketId !== socket.id).forEach((participant) => ensurePeer(participant.socketId!));
       }
       const nextMuted = !mutedRef.current;
       mutedRef.current = nextMuted;

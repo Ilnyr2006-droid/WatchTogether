@@ -29,7 +29,9 @@ export type VideoSource =
     };
 
 export interface Participant {
-  socketId: string;
+  id: string;
+  /** The participant's currently connected Socket.IO transport, or null while offline. */
+  socketId: string | null;
   username: string;
   muted: boolean;
   ready: boolean;
@@ -42,7 +44,11 @@ export interface VideoState {
   currentTime: number;
   playing: boolean;
   updatedAt: number;
+  revision: number;
+  updatedBy: string | null;
 }
+
+export type RoomControlMode = "everyone" | "host-only" | "approved";
 
 export interface RoomState {
   id: string;
@@ -50,6 +56,9 @@ export interface RoomState {
   participants: Participant[];
   video: VideoState;
   messages: ChatMessage[];
+  controlMode: RoomControlMode;
+  controlRequests: string[];
+  approvedControllerIds: string[];
 }
 
 export interface ChatMessage {
@@ -77,12 +86,13 @@ export interface ServerToClientEvents {
   "room:error": (error: { message: string; code: string }) => void;
   "participant:joined": (participant: Participant) => void;
   "participant:left": (payload: {
-    socketId: string;
+    participantId: string;
     hostId: string | null;
   }) => void;
   "participant:update": (participant: Participant) => void;
   "video:state": (video: VideoState) => void;
   "chat:message": (message: ChatMessage) => void;
+  "room:control-request": (participantId: string) => void;
   "webrtc:offer": (payload: SignalDescription) => void;
   "webrtc:answer": (payload: SignalDescription) => void;
   "webrtc:ice-candidate": (payload: SignalCandidate) => void;
@@ -110,13 +120,13 @@ type Ack<T = undefined> = (
 export interface ClientToServerEvents {
   "room:create": (
     payload: { username: string },
-    ack: Ack<{ roomId: string; roomToken: string; ownerToken: string }>,
+    ack: Ack<{ roomId: string; roomToken: string; ownerToken: string; participantId: string; sessionToken: string }>,
   ) => void;
   "room:join": (
-    payload: { roomId: string; username: string; roomToken: string; ownerToken?: string },
-    ack: Ack<{ room: RoomState; streamToken: string }>,
+    payload: { roomId: string; username: string; roomToken: string; ownerToken?: string; participantId?: string; sessionToken?: string },
+    ack: Ack<{ room: RoomState; streamToken: string; participantId: string; sessionToken: string }>,
   ) => void;
-  "room:leave": () => void;
+  "room:leave": (ack?: Ack) => void;
   "participant:update": (payload: { muted?: boolean; ready?: boolean }) => void;
   "video:set-source": (
     payload:
@@ -129,6 +139,9 @@ export interface ClientToServerEvents {
     currentTime: number;
   }) => void;
   "chat:send": (payload: { text: string }, ack: Ack) => void;
+  "room:control-mode": (payload: { mode: RoomControlMode }) => void;
+  "room:control-request": () => void;
+  "room:control-decision": (payload: { participantId: string; approved: boolean }) => void;
   "webrtc:offer": (payload: Omit<SignalDescription, "from">) => void;
   "webrtc:answer": (payload: Omit<SignalDescription, "from">) => void;
   "webrtc:ice-candidate": (payload: Omit<SignalCandidate, "from">) => void;
@@ -152,4 +165,5 @@ export type InterServerEvents = Record<never, never>;
 export interface SocketData {
   roomId?: string;
   username?: string;
+  participantId?: string;
 }

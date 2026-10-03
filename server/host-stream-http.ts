@@ -134,7 +134,7 @@ async function streamHostFile(request: IncomingMessage, response: ServerResponse
   try { file = await dependencies.streams.refresh(roomId); }
   catch { file = null; }
   if (!file || file.fileName !== source.fileName || file.streamId !== source.streamId) {
-    stopUnavailableStream(roomId, dependencies);
+    stopUnavailableStream(roomId, session.participantId, dependencies);
     return sendJson(response, 410, { error: "Фильм больше недоступен на компьютере Host" });
   }
 
@@ -165,9 +165,9 @@ async function streamHostFile(request: IncomingMessage, response: ServerResponse
   fileStream.pipe(response);
 }
 
-function stopUnavailableStream(roomId: string, dependencies: HostStreamHttpDependencies) {
+function stopUnavailableStream(roomId: string, participantId: string, dependencies: HostStreamHttpDependencies) {
   dependencies.streams.clear(roomId);
-  const video = dependencies.rooms.clearSource(roomId);
+  const video = dependencies.rooms.clearSource(roomId, participantId);
   if (video) dependencies.io.to(roomId).emit("video:state", video);
   dependencies.io.to(roomId).emit("room:error", { code: "HOST_STREAM_UNAVAILABLE", message: "Фильм больше недоступен на компьютере Host" });
 }

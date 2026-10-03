@@ -39,6 +39,8 @@ function HomeContent() {
         const invitation = buildInvitation(baseUrl, created.data.roomId, created.data.roomToken);
         sessionStorage.setItem(`watchtogether:room-token:${created.data.roomId}`, created.data.roomToken);
         sessionStorage.setItem(`watchtogether:owner-token:${created.data.roomId}`, created.data.ownerToken);
+        sessionStorage.setItem(`watchtogether:participant-id:${created.data.roomId}`, created.data.participantId);
+        sessionStorage.setItem(`watchtogether:session-token:${created.data.roomId}`, created.data.sessionToken);
         sessionStorage.setItem(`watchtogether:invitation:${created.data.roomId}`, invitation);
         sessionStorage.setItem("watchtogether:network", JSON.stringify(network));
         router.push(`/room/${created.data.roomId}?token=${encodeURIComponent(created.data.roomToken)}`);
