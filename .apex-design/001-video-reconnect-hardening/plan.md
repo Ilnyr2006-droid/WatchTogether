@@ -50,3 +50,10 @@
   - verify: `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run test:e2e`.
   - done: every command exits successfully and no test opens external network access.
   - satisfies: R-10, R-11, R-12, R-13, R-14
+
+- T-08 — Restore authoritative playback after permission loss and clean replaced socket streams
+  - files: `hooks/use-video-sync.ts`, `hooks/use-rutube-player.ts`, `lib/video-sync.ts`, `server/room-manager.ts`, `server/socket-server.ts`, playback/permission/stream lifecycle tests
+  - action: detect only the `canControl: true → false` edge and force-apply the latest authoritative state in HTML5/P2P and RUTUBE players; invalidate the replaced socket's stream token and close its active transfers during session takeover.
+  - verify: unit-test all four previous/current permission combinations; E2E-delay a Guest play until after Host revoke and assert `FORBIDDEN`, unchanged server revision, restored paused/playhead state and peer convergence; test stream token and transfer cleanup on takeover.
+  - done: the permission-loss rollback does not emit a compensating action, and old stream resources cannot outlive their replaced socket.
+  - satisfies: R-15, R-16

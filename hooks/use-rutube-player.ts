@@ -2,7 +2,7 @@
 
 import { RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
-import { effectiveVideoTime, isNewerVideoRevision, needsTimeCorrection } from "@/lib/video-sync";
+import { effectiveVideoTime, isNewerVideoRevision, needsTimeCorrection, shouldResyncOnControlLoss } from "@/lib/video-sync";
 import { classifyRutubePlayerError, type RutubePlayerStatus } from "@/lib/rutube-player-state";
 import type { ClientToServerEvents, ServerToClientEvents, VideoState } from "@/types/realtime";
 
@@ -38,6 +38,7 @@ export function useRutubePlayer({ iframeRef, socket, isHost, canControl, video }
   const playingRef = useRef(video.playing);
   const latestVideoRef = useRef(video);
   const latestAppliedRevision = useRef(-1);
+  const previousCanControl = useRef(canControl);
   const suppressUntilRef = useRef(0);
   const lastSampleRef = useRef<{ time: number; at: number } | null>(null);
   const lastSeekEmitRef = useRef(0);
@@ -72,6 +73,12 @@ export function useRutubePlayer({ iframeRef, socket, isHost, canControl, video }
   }, [command]);
 
   useEffect(() => { applyRemoteState(video); }, [applyRemoteState, video]);
+
+  useEffect(() => {
+    const lostControl = shouldResyncOnControlLoss(previousCanControl.current, canControl);
+    previousCanControl.current = canControl;
+    if (lostControl) applyRemoteState(video, true);
+  }, [applyRemoteState, canControl, video]);
 
   useEffect(() => {
     if (status === "ready") command({ type: "player:showControls", data: {} });

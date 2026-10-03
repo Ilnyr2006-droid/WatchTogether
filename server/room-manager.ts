@@ -49,7 +49,10 @@ export class RoomManager {
       if (!existing) return null;
       participant = existing;
       replacedSocketId = existing.socketId && existing.socketId !== socketId ? existing.socketId : null;
-      if (replacedSocketId) this.socketBindings.delete(replacedSocketId);
+      if (replacedSocketId) {
+        this.socketBindings.delete(replacedSocketId);
+        this.invalidateStreamToken(replacedSocketId);
+      }
       participant.socketId = socketId;
       participant.connected = true;
       this.bind(socketId, room, participant);
@@ -58,7 +61,10 @@ export class RoomManager {
       participant = room.participants.find((item) => item.id === ownerId) ?? this.makeParticipant(socketId, username);
       if (!room.participants.some((item) => item.id === participant.id)) room.participants.push(participant);
       replacedSocketId = participant.socketId && participant.socketId !== socketId ? participant.socketId : null;
-      if (replacedSocketId) this.socketBindings.delete(replacedSocketId);
+      if (replacedSocketId) {
+        this.socketBindings.delete(replacedSocketId);
+        this.invalidateStreamToken(replacedSocketId);
+      }
       room.hostId = participant.id;
       participant.socketId = socketId;
       participant.connected = true;

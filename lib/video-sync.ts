@@ -6,6 +6,10 @@ export function isNewerVideoRevision(appliedRevision: number, incomingRevision: 
   return incomingRevision > appliedRevision;
 }
 
+export function shouldResyncOnControlLoss(previousCanControl: boolean, canControl: boolean) {
+  return previousCanControl && !canControl;
+}
+
 export function getLocalPlaybackIntent(
   action: "play" | "pause",
   desiredPlaying: boolean | null,

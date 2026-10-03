@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectiveVideoTime, getLocalPlaybackIntent, isNewerVideoRevision, needsTimeCorrection } from "@/lib/video-sync";
+import { effectiveVideoTime, getLocalPlaybackIntent, isNewerVideoRevision, needsTimeCorrection, shouldResyncOnControlLoss } from "@/lib/video-sync";
 
 describe("video synchronization", () => {
   it("accounts for elapsed server time while playing", () => {
@@ -19,6 +19,13 @@ describe("video synchronization", () => {
     expect(isNewerVideoRevision(3, 4)).toBe(true);
     expect(isNewerVideoRevision(4, 4)).toBe(false);
     expect(isNewerVideoRevision(4, 3)).toBe(false);
+  });
+
+  it("forces an authoritative resync only when playback control is revoked", () => {
+    expect(shouldResyncOnControlLoss(true, false)).toBe(true);
+    expect(shouldResyncOnControlLoss(false, false)).toBe(false);
+    expect(shouldResyncOnControlLoss(false, true)).toBe(false);
+    expect(shouldResyncOnControlLoss(true, true)).toBe(false);
   });
 
   it("suppresses remote playback echoes by desired state without blocking a new local intent", () => {

@@ -32,11 +32,14 @@ describe("RoomManager", () => {
     const manager = new RoomManager();
     const room = manager.create("owner-old", "Owner");
     const auth = manager.getCredentials("owner-old")!;
+    const oldStreamToken = manager.issueStreamToken("owner-old")!;
+    expect(manager.authorizeStream(room.id, oldStreamToken)).not.toBeNull();
     const joined = manager.join(room.id, "owner-new", "Owner", auth.roomToken, { participantId: auth.participantId!, sessionToken: auth.sessionToken })!;
     expect(joined.replacedSocketId).toBe("owner-old");
     expect(joined.room.hostId).toBe(auth.participantId);
     expect(joined.room.participants).toHaveLength(1);
     expect(manager.getBySocket("owner-old")).toBeUndefined();
+    expect(manager.authorizeStream(room.id, oldStreamToken)).toBeNull();
   });
 
   it("restores the original Host from the invite even after the session credential expires", () => {

@@ -186,15 +186,18 @@ export async function delayVideoActionTransport(page: Page, delayMs = 250) {
   await page.evaluate((delay) => {
     const target = window as Window & {
       __watchTogetherSocket?: { emit: (event: string, ...args: unknown[]) => unknown };
+      __videoActionQueued?: number;
     };
     const socket = target.__watchTogetherSocket;
     if (!socket) throw new Error("E2E socket hook is unavailable");
     const originalEmit = socket.emit.bind(socket);
     const queue: Array<{ event: string; args: unknown[] }> = [];
     let timer: number | undefined;
+    target.__videoActionQueued = 0;
     socket.emit = (event, ...args) => {
       if (event !== "video:action") return originalEmit(event, ...args);
       queue.push({ event, args });
+      target.__videoActionQueued = (target.__videoActionQueued ?? 0) + 1;
       if (timer === undefined) {
         timer = window.setTimeout(() => {
           timer = undefined;
@@ -204,6 +207,10 @@ export async function delayVideoActionTransport(page: Page, delayMs = 250) {
       return socket;
     };
   }, delayMs);
+}
+
+export async function videoActionQueuedCount(page: Page) {
+  return page.evaluate(() => (window as Window & { __videoActionQueued?: number }).__videoActionQueued ?? 0);
 }
 
 export async function disconnectSocket(page: Page) {

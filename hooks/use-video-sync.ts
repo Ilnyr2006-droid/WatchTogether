@@ -2,7 +2,7 @@
 
 import { RefObject, useCallback, useEffect, useRef } from "react";
 import type { Socket } from "socket.io-client";
-import { effectiveVideoTime, getLocalPlaybackIntent, isNewerVideoRevision, needsTimeCorrection } from "@/lib/video-sync";
+import { effectiveVideoTime, getLocalPlaybackIntent, isNewerVideoRevision, needsTimeCorrection, shouldResyncOnControlLoss } from "@/lib/video-sync";
 import type { ClientToServerEvents, ServerToClientEvents, VideoState } from "@/types/realtime";
 
 export function useVideoSync({ videoRef, isHost, canControl = true, socket, videoState }: {
@@ -18,6 +18,7 @@ export function useVideoSync({ videoRef, isHost, canControl = true, socket, vide
   const applyStateRef = useRef<(state: VideoState, force?: boolean) => Promise<void>>(async () => {});
   const desiredPlaying = useRef<boolean | null>(null);
   const unlockTimer = useRef<number | undefined>(undefined);
+  const previousCanControl = useRef(canControl);
 
   const applyState = useCallback(async (state: VideoState, force = false) => {
     const video = videoRef.current;
@@ -29,7 +30,7 @@ export function useVideoSync({ videoRef, isHost, canControl = true, socket, vide
     applyingRemote.current = true;
     const target = effectiveVideoTime(state);
     try {
-      if (needsTimeCorrection(video.currentTime, target) && Number.isFinite(target)) video.currentTime = target;
+      if ((force || needsTimeCorrection(video.currentTime, target)) && Number.isFinite(target)) video.currentTime = target;
       if (state.playing && video.paused) await video.play();
       if (!state.playing && !video.paused) video.pause();
     } catch { /* Browser may require a user gesture; controls remain available. */ }
@@ -47,6 +48,12 @@ export function useVideoSync({ videoRef, isHost, canControl = true, socket, vide
   useEffect(() => {
     if (videoState) void applyState(videoState);
   }, [applyState, videoState]);
+
+  useEffect(() => {
+    const lostControl = shouldResyncOnControlLoss(previousCanControl.current, canControl);
+    previousCanControl.current = canControl;
+    if (lostControl && videoState) void applyState(videoState, true);
+  }, [applyState, canControl, videoState]);
 
   useEffect(() => () => { if (unlockTimer.current) window.clearTimeout(unlockTimer.current); }, []);
 

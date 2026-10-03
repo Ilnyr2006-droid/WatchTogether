@@ -11,6 +11,7 @@
 - T-05 — done — late join during playback and reconnect/owner recovery lifecycle covered with identity/count assertions.
 - T-06 — done — two-guest P2P transfer recovers after an ordinary Socket.IO reconnect with stable identity and increasing received bytes.
 - T-07 — done — all requested checks passed: 74 unit tests and 7 offline E2E tests, typecheck, lint, and production build.
+- T-08 — done — HTML5/P2P and RUTUBE force-resync only on control loss; the delayed-play/revoke E2E verifies `FORBIDDEN`, unchanged revision, paused media and restored playhead; takeover tests verify stream-token invalidation and active-transfer closure.
 
 ## Decisions and blockers
 - Requester confirmed the decision digest and glossary and authorized implementation on 2026-10-04.
@@ -26,4 +27,5 @@
 - Current branch is `p0-participant-reconnect-control`; code checkout was clean before the planning workspace was created.
 - Existing local E2E server uses port 4173 and `WATCHTOGETHER_E2E=true`; fixture media and loopback STUN are already present.
 - Implementation is complete on the planned branch; validation used the local E2E fixture, isolated test port, and loopback-only ICE configuration.
+- Final validation for T-08 passed: 76 unit tests, typecheck, lint, build, and 8 offline Playwright E2E tests.
 - No production deployment or restart was performed.

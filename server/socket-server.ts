@@ -118,6 +118,7 @@ export function attachSocketServer(
         participantId,
       };
       socket.join(parsed.data.roomId);
+      if (joined.replacedSocketId) streams.closeParticipant(joined.replacedSocketId);
       const streamToken = rooms.issueStreamToken(socket.id);
       if (!streamToken)
         return ack({ ok: false, error: "Не удалось создать сессию комнаты" });

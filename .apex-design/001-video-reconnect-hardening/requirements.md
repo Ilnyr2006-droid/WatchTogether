@@ -17,3 +17,5 @@
 - R-12 — Remote play/pause application must not generate an infinite `video:action` → revision → state cycle.
 - R-13 — Removed participant credentials must not create a duplicate identity or bypass the selected Host ownership policy; the owner recovery secret must never be placed in the invite URL or exposed to guests.
 - R-14 — A failed P2P reconnect must be visible as a recoverable connection state, not a fatal uncaught browser error; existing peer connections must be closed before replacement.
+- R-15 — On the `canControl: true → false` transition, HTML5/P2P and RUTUBE players force-apply the current authoritative video state even when its revision is unchanged; the correction restores playback and seek position without emitting a video action.
+- R-16 — When a live participant session is taken over by a new socket, the replaced socket's stream token is invalidated and any active host-stream transfers associated with it are closed.
