@@ -52,6 +52,8 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
   const applyRemoteState = useCallback((state: VideoState, force = false) => {
     if (!readyRef.current || advertisingRef.current) return;
     suppressUntilRef.current = Date.now() + 1_500;
+    playingRef.current = state.playing;
+    lastStateEmitRef.current = state.playing ? "playing" : "paused";
     const target = effectiveVideoTime(state);
     if (force || needsTimeCorrection(currentTimeRef.current, target)) {
       command({ type: "player:setCurrentTime", data: { time: Math.max(0, target) } });
@@ -63,8 +65,8 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
   useEffect(() => { applyRemoteState(video); }, [applyRemoteState, video]);
 
   useEffect(() => {
-    if (status === "ready") command({ type: isHost ? "player:showControls" : "player:hideControls", data: {} });
-  }, [command, isHost, status]);
+    if (status === "ready") command({ type: "player:showControls", data: {} });
+  }, [command, status]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -74,7 +76,7 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
 
       if (message.type === "player:ready") {
         readyRef.current = true; setStatus("ready");
-        command({ type: isHost ? "player:showControls" : "player:hideControls", data: {} });
+        command({ type: "player:showControls", data: {} });
         applyRemoteState(latestVideoRef.current, true);
         return;
       }
@@ -103,7 +105,7 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
         const now = Date.now();
         const previous = lastSampleRef.current;
         currentTimeRef.current = time;
-        if (isHost && !advertisingRef.current && now >= suppressUntilRef.current && previous) {
+        if (!advertisingRef.current && now >= suppressUntilRef.current && previous) {
           const expected = previous.time + (playingRef.current ? (now - previous.at) / 1000 : 0);
           if (Math.abs(time - expected) > 1.1 && now - lastSeekEmitRef.current > 700) {
             lastSeekEmitRef.current = now;
@@ -118,7 +120,7 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
         if (state !== "playing" && state !== "pause" && state !== "paused" && state !== "stopped") return;
         const normalized = state === "playing" ? "playing" : "paused";
         playingRef.current = normalized === "playing";
-        if (isHost && !advertisingRef.current && Date.now() >= suppressUntilRef.current && lastStateEmitRef.current !== normalized) {
+        if (!advertisingRef.current && Date.now() >= suppressUntilRef.current && lastStateEmitRef.current !== normalized) {
           lastStateEmitRef.current = normalized;
           socket.emit("video:action", { action: normalized === "playing" ? "play" : "pause", currentTime: currentTimeRef.current });
         }
@@ -126,7 +128,7 @@ export function useRutubePlayer({ iframeRef, socket, isHost, video }: {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [applyRemoteState, command, iframeRef, isHost, socket]);
+  }, [applyRemoteState, command, iframeRef, socket]);
 
   useEffect(() => {
     if (!isHost) return;

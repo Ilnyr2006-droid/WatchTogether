@@ -19,6 +19,7 @@ export const roomJoinSchema = z
     roomId: roomIdSchema,
     username: usernameSchema,
     roomToken: roomTokenSchema,
+    ownerToken: roomTokenSchema.optional(),
   })
   .strict();
 export const participantUpdateSchema = z

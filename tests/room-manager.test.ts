@@ -20,14 +20,25 @@ describe("RoomManager", () => {
     expect(manager.get(room.id)).toBeNull();
   });
 
-  it("only allows the host to change playback", () => {
+  it("restores the owner role after a browser reconnect", () => {
+    const manager = new RoomManager();
+    const room = manager.create("owner", "Owner");
+    const invitationToken = manager.getRoomTokenForHost("owner")!;
+    const ownerToken = manager.getOwnerTokenForHost("owner")!;
+    manager.join(room.id, "guest", "Guest", invitationToken);
+    manager.leave("owner");
+    manager.join(room.id, "owner-reconnected", "Owner", invitationToken, ownerToken);
+    expect(manager.get(room.id)?.hostId).toBe("owner-reconnected");
+  });
+
+  it("allows every participant to control playback", () => {
     const manager = new RoomManager();
     const room = manager.create("host", "Host");
     manager.join(room.id, "guest", "Guest", manager.getRoomTokenForHost("host")!);
-    expect(manager.setSource("guest", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" })).toBeNull();
-    manager.setSource("host", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" });
-    expect(manager.updateVideo("guest", "play", 12)).toBeNull();
-    expect(manager.updateVideo("host", "play", 12)?.playing).toBe(true);
+    expect(manager.setSource("guest", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" })?.source).toMatchObject({ mode: "url" });
+    expect(manager.setSource("guest", { provider: "html5", mode: "local", fileName: "private.mp4" })).toBeNull();
+    expect(manager.updateVideo("guest", "play", 12)?.playing).toBe(true);
+    expect(manager.updateVideo("guest", "pause", 12)?.playing).toBe(false);
   });
 
   it("stores a RUTUBE provider and returns current state to a late participant", () => {

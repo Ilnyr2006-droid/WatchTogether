@@ -260,9 +260,9 @@ export function VideoPlayer({
             {publicSourceLabel(video.source)}
           </span>
         </div>
-        {isHost && (
+        {(isHost ? choices : choices.filter((item) => item.value === "rutube" || item.value === "url")).length > 0 && (
           <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-            {choices.map((item) => (
+            {(isHost ? choices : choices.filter((item) => item.value === "rutube" || item.value === "url")).map((item) => (
               <button
                 key={item.value}
                 type="button"
@@ -277,7 +277,7 @@ export function VideoPlayer({
             ))}
           </div>
         )}
-        {isHost && (choice === "rutube" || choice === "url") && (
+        {(choice === "rutube" || choice === "url") && (
           <form
             className="flex flex-col gap-2 sm:flex-row"
             onSubmit={submitUrl}
@@ -443,7 +443,7 @@ export function VideoPlayer({
         )}
         {!isHost && (
           <p className="mt-2 text-xs text-slate-500">
-            Управление воспроизведением доступно Host.
+            Вы можете менять ссылку и управлять воспроизведением.
           </p>
         )}
       </div>

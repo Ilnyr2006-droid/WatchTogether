@@ -32,9 +32,9 @@ export function useVideoSync({ videoRef, socket, isHost, videoState }: {
 
   const emit = useCallback((action: "play" | "pause" | "seek") => {
     const video = videoRef.current;
-    if (!isHost || !video || applyingRemote.current) return;
+    if (!video || applyingRemote.current) return;
     socket.emit("video:action", { action, currentTime: video.currentTime });
-  }, [isHost, socket, videoRef]);
+  }, [socket, videoRef]);
 
   useEffect(() => {
     if (!isHost) return;

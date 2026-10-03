@@ -64,7 +64,7 @@ export function P2PMoviePlayer({
       <div className="relative aspect-video">
         <video
           ref={videoRef}
-          controls={isHost}
+          controls
           playsInline
           preload="metadata"
           className="h-full w-full"

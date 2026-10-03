@@ -8,6 +8,7 @@ export class RoomManager {
   private readonly rooms = new Map<string, RoomRecord>();
   private readonly socketRooms = new Map<string, string>();
   private readonly roomTokens = new Map<string, string>();
+  private readonly ownerTokens = new Map<string, string>();
   private readonly streamTokens = new Map<string, { roomId: string; socketId: string }>();
   private readonly socketTokens = new Map<string, string>();
 
@@ -21,15 +22,17 @@ export class RoomManager {
     };
     this.rooms.set(id, room);
     this.roomTokens.set(id, randomBytes(32).toString("base64url"));
+    this.ownerTokens.set(id, randomBytes(32).toString("base64url"));
     this.socketRooms.set(socketId, id);
     return this.snapshot(room);
   }
 
-  join(roomId: string, socketId: string, username: string, roomToken: string): RoomState | null {
+  join(roomId: string, socketId: string, username: string, roomToken: string, ownerToken?: string): RoomState | null {
     const room = this.rooms.get(roomId);
     if (!room || !this.isRoomTokenValid(roomId, roomToken)) return null;
     const existing = room.participants.find((p) => p.socketId === socketId);
     if (!existing) room.participants.push(this.participant(socketId, username));
+    if (ownerToken && this.isOwnerTokenValid(roomId, ownerToken)) room.hostId = socketId;
     this.socketRooms.set(socketId, roomId);
     return this.snapshot(room);
   }
@@ -44,7 +47,7 @@ export class RoomManager {
     const room = this.rooms.get(roomId);
     if (!room) return null;
     room.participants = room.participants.filter((p) => p.socketId !== socketId);
-    if (room.participants.length === 0) { this.rooms.delete(roomId); this.roomTokens.delete(roomId); return { roomId, hostId: null }; }
+    if (room.participants.length === 0) { this.rooms.delete(roomId); this.roomTokens.delete(roomId); this.ownerTokens.delete(roomId); return { roomId, hostId: null }; }
     if (room.hostId === socketId) room.hostId = room.participants[0].socketId;
     return { roomId, hostId: room.hostId };
   }
@@ -59,8 +62,21 @@ export class RoomManager {
     return room?.hostId === socketId ? this.roomTokens.get(room.id) ?? null : null;
   }
 
+  getOwnerTokenForHost(socketId: string) {
+    const room = this.getBySocket(socketId);
+    return room?.hostId === socketId ? this.ownerTokens.get(room.id) ?? null : null;
+  }
+
   isRoomTokenValid(roomId: string, candidate: string) {
     const expected = this.roomTokens.get(roomId);
+    if (!expected || typeof candidate !== "string") return false;
+    const expectedBuffer = Buffer.from(expected);
+    const candidateBuffer = Buffer.from(candidate);
+    return expectedBuffer.length === candidateBuffer.length && timingSafeEqual(expectedBuffer, candidateBuffer);
+  }
+
+  private isOwnerTokenValid(roomId: string, candidate: string) {
+    const expected = this.ownerTokens.get(roomId);
     if (!expected || typeof candidate !== "string") return false;
     const expectedBuffer = Buffer.from(expected);
     const candidateBuffer = Buffer.from(candidate);
@@ -104,7 +120,8 @@ export class RoomManager {
 
   setSource(socketId: string, source: VideoSource): VideoState | null {
     const room = this.getBySocket(socketId);
-    if (!room || room.hostId !== socketId) return null;
+    const isSharedLink = source.provider === "rutube" || source.mode === "url";
+    if (!room || (room.hostId !== socketId && !isSharedLink)) return null;
     room.video = { source, currentTime: 0, playing: false, updatedAt: Date.now() };
     const requiresClientFile = source.provider === "html5" && source.mode === "local";
     const streamsFromHost = source.provider === "html5" && source.mode === "p2p-movie";
@@ -116,7 +133,7 @@ export class RoomManager {
 
   updateVideo(socketId: string, action: "play" | "pause" | "seek" | "sync", currentTime: number): VideoState | null {
     const room = this.getBySocket(socketId);
-    if (!room || room.hostId !== socketId || !room.video.source) return null;
+    if (!room || !room.video.source) return null;
     room.video.currentTime = currentTime;
     if (action === "play") room.video.playing = true;
     if (action === "pause") room.video.playing = false;

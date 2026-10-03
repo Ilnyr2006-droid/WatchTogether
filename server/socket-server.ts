@@ -51,6 +51,7 @@ export function attachSocketServer(
   const movieDescriptionRate = new RateLimiter(20, 10_000);
   const movieCandidateRate = new RateLimiter(250, 10_000);
   const failedJoinRate = new FailedAttemptLimiter(8, 60_000);
+  const pendingDisconnectLeaves = new Map<string, ReturnType<typeof setTimeout>>();
 
   io.on("connection", (socket) => {
     const fail = (message: string, code = "INVALID_REQUEST") =>
@@ -63,15 +64,21 @@ export function attachSocketServer(
       leaveCurrent();
       const room = rooms.create(socket.id, parsed.data.username);
       const roomToken = rooms.getRoomTokenForHost(socket.id);
-      if (!roomToken)
+      const ownerToken = rooms.getOwnerTokenForHost(socket.id);
+      if (!roomToken || !ownerToken)
         return ack({ ok: false, error: "Не удалось защитить комнату" });
       socket.data = { roomId: room.id, username: parsed.data.username };
       socket.join(room.id);
-      ack({ ok: true, data: { roomId: room.id, roomToken } });
+      ack({ ok: true, data: { roomId: room.id, roomToken, ownerToken } });
       socket.emit("room:state", room);
     });
 
     socket.on("room:join", (payload, ack) => {
+      const pendingLeave = pendingDisconnectLeaves.get(socket.id);
+      if (pendingLeave) {
+        clearTimeout(pendingLeave);
+        pendingDisconnectLeaves.delete(socket.id);
+      }
       const attemptKey = socket.handshake.address || "unknown";
       if (failedJoinRate.isBlocked(attemptKey))
         return ack({
@@ -93,6 +100,7 @@ export function attachSocketServer(
         socket.id,
         parsed.data.username,
         parsed.data.roomToken,
+        parsed.data.ownerToken,
       );
       if (!state) {
         failedJoinRate.recordFailure(attemptKey);
@@ -178,9 +186,9 @@ export function attachSocketServer(
         parsed.data.action,
         parsed.data.currentTime,
       );
-      if (!video) return fail("Управлять видео может только host", "FORBIDDEN");
+      if (!video) return fail("Сначала выберите видео", "INVALID_VIDEO_STATE");
       if (socket.data.roomId)
-        socket.to(socket.data.roomId).emit("video:state", video);
+        io.to(socket.data.roomId).emit("video:state", video);
     });
 
     socket.on("chat:send", (payload, ack) => {
@@ -302,7 +310,17 @@ export function attachSocketServer(
     }
 
     socket.on("disconnect", () => {
-      leaveCurrent();
+      // A browser refresh creates a new Socket.IO connection. Keep this
+      // socket in the room briefly so the refreshed page can join again
+      // instead of deleting the room or immediately transferring the host.
+      if (rooms.getBySocket(socket.id)) {
+        streams.closeParticipant(socket.id);
+        const timer = setTimeout(() => {
+          pendingDisconnectLeaves.delete(socket.id);
+          leaveCurrent();
+        }, 30_000);
+        pendingDisconnectLeaves.set(socket.id, timer);
+      }
       chatRate.clear(socket.id);
       participantRate.clear(socket.id);
       videoRate.clear(socket.id);

@@ -32,6 +32,10 @@ export default function RoomPage() {
       : tokenFromUrl ||
         sessionStorage.getItem(`watchtogether:room-token:${params.roomId}`) ||
         "";
+  const ownerToken =
+    typeof window === "undefined"
+      ? ""
+      : sessionStorage.getItem(`watchtogether:owner-token:${params.roomId}`) || "";
   const storedInvitation =
     typeof window === "undefined"
       ? ""
@@ -59,7 +63,7 @@ export default function RoomPage() {
     if (!roomToken) return;
     socket.emit(
       "room:join",
-      { roomId: params.roomId, username, roomToken },
+      { roomId: params.roomId, username, roomToken, ownerToken: ownerToken || undefined },
       (response) => {
         if (response.ok) {
           sessionStorage.setItem(
@@ -72,7 +76,7 @@ export default function RoomPage() {
         } else setError(response.error);
       },
     );
-  }, [connected, params.roomId, roomToken, router, socket, username]);
+  }, [connected, ownerToken, params.roomId, roomToken, router, socket, username]);
 
   useEffect(() => {
     const state = (next: RoomState) => setRoom(next);
@@ -152,6 +156,7 @@ export default function RoomPage() {
     socket.emit("room:leave");
     sessionStorage.removeItem(`watchtogether:room-token:${params.roomId}`);
     sessionStorage.removeItem(`watchtogether:invitation:${params.roomId}`);
+    sessionStorage.removeItem(`watchtogether:owner-token:${params.roomId}`);
   };
 
   if (!room) {

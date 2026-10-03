@@ -110,10 +110,10 @@ type Ack<T = undefined> = (
 export interface ClientToServerEvents {
   "room:create": (
     payload: { username: string },
-    ack: Ack<{ roomId: string; roomToken: string }>,
+    ack: Ack<{ roomId: string; roomToken: string; ownerToken: string }>,
   ) => void;
   "room:join": (
-    payload: { roomId: string; username: string; roomToken: string },
+    payload: { roomId: string; username: string; roomToken: string; ownerToken?: string },
     ack: Ack<{ room: RoomState; streamToken: string }>,
   ) => void;
   "room:leave": () => void;

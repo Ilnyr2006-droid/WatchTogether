@@ -12,6 +12,16 @@ export function ChatPanel({ socket, initialMessages = [] }: { socket: Socket<Ser
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setMessages((current) => {
+      const merged = new Map(current.map((message) => [message.id, message]));
+      initialMessages.forEach((message) => merged.set(message.id, message));
+      return [...merged.values()]
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .slice(-100);
+    });
+  }, [initialMessages]);
+
+  useEffect(() => {
     const receive = (message: ChatMessage) => setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current.slice(-99), message]);
     socket.on("chat:message", receive);
     return () => { socket.off("chat:message", receive); };

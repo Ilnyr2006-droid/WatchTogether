@@ -36,7 +36,7 @@ describe("host stream lifecycle", () => {
     streams.track(created.data.roomId, guest.id!, { destroy: () => { transferDestroyed = true; } });
 
     const stopped = new Promise<string>((resolve) => guest.on("room:error", ({ code, message }) => { if (code === "HOST_STREAM_STOPPED") resolve(message); }));
-    host.disconnect();
+    host.emit("room:leave");
     expect(await stopped).toContain("Трансляция фильма остановлена");
     expect(streams.get(created.data.roomId)).toBeNull();
     expect(transferDestroyed).toBe(true);
