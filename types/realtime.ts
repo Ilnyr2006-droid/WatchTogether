@@ -49,6 +49,7 @@ export interface VideoState {
 }
 
 export type RoomControlMode = "everyone" | "host-only" | "approved";
+export type RoomControlAction = "approve" | "reject" | "revoke";
 
 export interface RoomState {
   id: string;
@@ -141,7 +142,9 @@ export interface ClientToServerEvents {
   "chat:send": (payload: { text: string }, ack: Ack) => void;
   "room:control-mode": (payload: { mode: RoomControlMode }) => void;
   "room:control-request": () => void;
-  "room:control-decision": (payload: { participantId: string; approved: boolean }) => void;
+  "room:control-approve": (payload: { participantId: string }) => void;
+  "room:control-reject": (payload: { participantId: string }) => void;
+  "room:control-revoke": (payload: { participantId: string }) => void;
   "webrtc:offer": (payload: Omit<SignalDescription, "from">) => void;
   "webrtc:answer": (payload: Omit<SignalDescription, "from">) => void;
   "webrtc:ice-candidate": (payload: Omit<SignalCandidate, "from">) => void;

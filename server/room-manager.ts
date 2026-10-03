@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import type { ChatMessage, Participant, RoomControlMode, RoomState, VideoSource, VideoState } from "@/types/realtime";
+import type { ChatMessage, Participant, RoomControlAction, RoomControlMode, RoomState, VideoSource, VideoState } from "@/types/realtime";
 import { effectiveVideoTime } from "@/lib/video-sync";
 
 type RoomRecord = RoomState;
@@ -111,10 +111,10 @@ export class RoomManager {
   get(roomId: string) { const room = this.rooms.get(roomId); return room ? this.snapshot(room) : null; }
   isHost(socketId: string) { const room = this.getBySocket(socketId); return !!room && room.hostId === this.getParticipantId(socketId); }
   hasParticipant(room: RoomRecord, socketId: string) { return room.participants.some((p) => p.connected && p.socketId === socketId); }
-  canControl(socketId: string) {
+  canControlPlayback(socketId: string) {
     const room = this.getBySocket(socketId);
     const participantId = this.getParticipantId(socketId);
-    return !!room && !!participantId && (room.controlMode === "everyone" || room.hostId === participantId || (room.controlMode === "approved" && room.approvedControllerIds.includes(participantId)));
+    return !!room && !!participantId && (room.hostId === participantId || room.controlMode === "everyone" || (room.controlMode === "approved" && room.approvedControllerIds.includes(participantId)));
   }
   getRoomTokenForHost(socketId: string) { return this.isHost(socketId) ? this.roomTokens.get(this.getBySocket(socketId)!.id) ?? null : null; }
   getOwnerTokenForHost(socketId: string) { return this.isHost(socketId) ? this.ownerTokens.get(this.getBySocket(socketId)!.id) ?? null : null; }
@@ -176,19 +176,24 @@ export class RoomManager {
     if (!room.approvedControllerIds.includes(participantId) && !room.controlRequests.includes(participantId)) room.controlRequests.push(participantId);
     return this.snapshot(room);
   }
-  decideControl(socketId: string, participantId: string, approved: boolean) {
+  decideControl(socketId: string, participantId: string, action: RoomControlAction) {
     const room = this.getBySocket(socketId);
-    if (!room || !this.isHost(socketId) || !room.participants.some((p) => p.id === participantId && p.connected)) return null;
-    room.controlRequests = room.controlRequests.filter((id) => id !== participantId);
-    room.approvedControllerIds = room.approvedControllerIds.filter((id) => id !== participantId);
-    if (approved) room.approvedControllerIds.push(participantId);
+    if (!room || room.controlMode !== "approved" || !this.isHost(socketId) || !room.participants.some((p) => p.id === participantId)) return null;
+    if (action === "approve") {
+      room.controlRequests = room.controlRequests.filter((id) => id !== participantId);
+      if (!room.approvedControllerIds.includes(participantId)) room.approvedControllerIds.push(participantId);
+    } else if (action === "reject") {
+      room.controlRequests = room.controlRequests.filter((id) => id !== participantId);
+    } else {
+      room.approvedControllerIds = room.approvedControllerIds.filter((id) => id !== participantId);
+    }
     return this.snapshot(room);
   }
 
   setSource(socketId: string, source: VideoSource): VideoState | null {
     const room = this.getBySocket(socketId); const participantId = this.getParticipantId(socketId);
     const restrictedSource = source.provider === "html5" && source.mode !== "url";
-    if (!room || !participantId || !this.canControl(socketId) || (restrictedSource && !this.isHost(socketId))) return null;
+    if (!room || !participantId || !this.canControlPlayback(socketId) || (restrictedSource && !this.isHost(socketId))) return null;
     room.video = { source, currentTime: 0, playing: false, updatedAt: Date.now(), revision: room.video.revision + 1, updatedBy: participantId };
     const requiresClientFile = source.provider === "html5" && source.mode === "local";
     const streamsFromHost = source.provider === "html5" && source.mode === "p2p-movie";
@@ -199,7 +204,7 @@ export class RoomManager {
   }
   updateVideo(socketId: string, action: "play" | "pause" | "seek" | "sync", currentTime: number): VideoState | null {
     const room = this.getBySocket(socketId); const participantId = this.getParticipantId(socketId);
-    if (!room || !participantId || !room.video.source || !this.canControl(socketId)) return null;
+    if (!room || !participantId || !room.video.source || !this.canControlPlayback(socketId)) return null;
     room.video.currentTime = currentTime;
     if (action === "play") room.video.playing = true;
     if (action === "pause") room.video.playing = false;

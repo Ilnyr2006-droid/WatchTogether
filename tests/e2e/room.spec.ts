@@ -33,6 +33,13 @@ async function videoState(page: Page) {
   }));
 }
 
+async function expectForbidden(page: Page, action: () => Promise<void>) {
+  const previousCount = await page.evaluate(() => (window as unknown as { __roomErrors?: string[] }).__roomErrors?.length ?? 0);
+  await action();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __roomErrors?: string[] }).__roomErrors?.length ?? 0)).toBe(previousCount + 1);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __roomErrors?: string[] }).__roomErrors?.at(-1))).toBe("FORBIDDEN");
+}
+
 test("creates room, joins/reconnects both roles, keeps chat and synchronizes revisioned playback", async ({ browser, baseURL }) => {
   const hostContext = await browser.newContext({ baseURL });
   const guestContext = await browser.newContext({ baseURL });
@@ -114,6 +121,14 @@ test("enforces host-only and approved control on the server", async ({ browser, 
   await createHost(host);
   const invitation = await host.evaluate(() => sessionStorage.getItem(`watchtogether:invitation:${location.pathname.split("/").at(-1)}`));
   await joinGuest(guest, invitation!);
+  await guest.evaluate(() => {
+    const browserWindow = window as unknown as {
+      __watchTogetherSocket?: { on: (event: string, listener: (payload: { code: string }) => void) => void };
+      __roomErrors?: string[];
+    };
+    browserWindow.__roomErrors = [];
+    browserWindow.__watchTogetherSocket?.on("room:error", (error) => browserWindow.__roomErrors?.push(error.code));
+  });
   await emit(host, "video:set-source", { input: `${baseURL}/test.mp4` });
   await expect(host.getByTestId("video-state")).toHaveAttribute("data-revision", "1");
 
@@ -121,7 +136,11 @@ test("enforces host-only and approved control on the server", async ({ browser, 
   await expect(guest.getByText("Только Host", { exact: true })).toBeVisible();
   await expect(guest.getByRole("button", { name: "Фильм с компьютера Host" })).toHaveCount(0);
   await expect(host.getByRole("button", { name: "Фильм с компьютера Host" })).toBeVisible();
-  await emit(guest, "video:action", { action: "pause", currentTime: 12 });
+  await expectForbidden(guest, () => emit(guest, "room:control-mode", { mode: "everyone" }));
+  await expect(guest.getByText("Только Host", { exact: true })).toBeVisible();
+  await expectForbidden(guest, () => emit(guest, "video:action", { action: "pause", currentTime: 12 }));
+  await expect(host.getByTestId("video-state")).toHaveAttribute("data-revision", "1");
+  await expectForbidden(guest, () => emit(guest, "video:set-source", { input: `${baseURL}/test.mp4` }));
   await expect(host.getByTestId("video-state")).toHaveAttribute("data-revision", "1");
 
   await host.getByLabel("Кто управляет видео").selectOption("approved");
@@ -129,10 +148,17 @@ test("enforces host-only and approved control on the server", async ({ browser, 
   await expect(host.getByText("Guest просит управление")).toBeVisible();
   await host.getByRole("button", { name: "Разрешить" }).click();
   await expect(guest.getByRole("button", { name: "Управление разрешено" })).toBeDisabled();
+  await emit(guest, "video:action", { action: "play", currentTime: 20 });
+  await expect(host.getByTestId("video-state")).toHaveAttribute("data-revision", "2");
   await host.getByRole("button", { name: "Отозвать" }).click();
   await expect(guest.getByRole("button", { name: "Запросить управление" })).toBeEnabled();
-  await emit(guest, "video:action", { action: "play", currentTime: 20 });
-  await expect(host.getByTestId("video-state")).toHaveAttribute("data-revision", "1");
+  await expectForbidden(guest, () => emit(guest, "video:action", { action: "pause", currentTime: 21 }));
+  await expect(host.getByTestId("video-state")).toHaveAttribute("data-revision", "2");
+  await guest.getByRole("button", { name: "Запросить управление" }).click();
+  await expect(host.getByText("Guest просит управление")).toBeVisible();
+  await host.getByRole("button", { name: "Отклонить" }).click();
+  await expect(host.getByText("Запросов пока нет")).toBeVisible();
+  await expect(guest.getByRole("button", { name: "Запросить управление" })).toBeEnabled();
 
   await hostContext.close();
   await guestContext.close();

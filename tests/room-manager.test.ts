@@ -60,25 +60,72 @@ describe("RoomManager", () => {
     expect(manager.get(room.id)).toBeNull();
   });
 
-  it("authorizes video changes according to room mode and approval list", () => {
+  it("allows every participant to control URL and RUTUBE playback in Everyone mode", () => {
+    const manager = new RoomManager();
+    const room = manager.create("host", "Host");
+    const token = manager.getCredentials("host")!.roomToken;
+    manager.join(room.id, "guest", "Guest", token);
+    expect(room.controlMode).toBe("everyone");
+    expect(manager.canControlPlayback("guest")).toBe(true);
+    expect(manager.setSource("guest", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" })?.source).toMatchObject({ mode: "url" });
+    expect(manager.updateVideo("guest", "play", 12)?.playing).toBe(true);
+    expect(manager.updateVideo("guest", "pause", 12)?.playing).toBe(false);
+    expect(manager.updateVideo("guest", "seek", 18)?.currentTime).toBe(18);
+    expect(manager.setSource("guest", { provider: "rutube", videoId: "7716bd3e665725c3c008ae7ab4ff02e2", accessKey: null, originalUrl: "https://rutube.ru/video/7716bd3e665725c3c008ae7ab4ff02e2/" })?.source).toMatchObject({ provider: "rutube" });
+  });
+
+  it("restricts playback and shared URL changes to Host in Host only mode", () => {
+    const manager = new RoomManager();
+    const room = manager.create("host", "Host");
+    const token = manager.getCredentials("host")!.roomToken;
+    manager.join(room.id, "guest", "Guest", token);
+    manager.setSource("host", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" });
+    manager.setControlMode("host", "host-only");
+    expect(manager.canControlPlayback("host")).toBe(true);
+    expect(manager.canControlPlayback("guest")).toBe(false);
+    expect(manager.updateVideo("guest", "play", 13)).toBeNull();
+    expect(manager.setSource("guest", { provider: "html5", mode: "url", url: "https://example.com/other.mp4" })).toBeNull();
+    expect(manager.updateVideo("host", "play", 13)?.playing).toBe(true);
+    expect(manager.setSource("host", { provider: "html5", mode: "url", url: "https://example.com/host.mp4" })?.source).toMatchObject({ mode: "url" });
+  });
+
+  it("supports Ask control request, approve, reject, and immediate revoke by participantId", () => {
     const manager = new RoomManager();
     const room = manager.create("host", "Host");
     const token = manager.getCredentials("host")!.roomToken;
     const guestJoin = manager.join(room.id, "guest", "Guest", token)!;
     const guest = guestJoin.room.participants.find((person) => person.socketId === "guest")!;
-    expect(manager.setSource("guest", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" })?.source).toMatchObject({ mode: "url" });
-    expect(manager.setSource("guest", { provider: "html5", mode: "local", fileName: "private.mp4" })).toBeNull();
-    expect(manager.updateVideo("guest", "play", 12)?.playing).toBe(true);
-    const firstRevision = manager.get(room.id)!.video.revision;
-    expect(manager.updateVideo("guest", "pause", 12)?.revision).toBe(firstRevision + 1);
-    manager.setControlMode("host", "host-only");
-    expect(manager.updateVideo("guest", "play", 13)).toBeNull();
-    manager.setControlMode("host", "approved");
+    manager.setSource("host", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" });
+    expect(manager.setControlMode("host", "approved")?.controlMode).toBe("approved");
+    expect(manager.canControlPlayback("host")).toBe(true);
+    expect(manager.canControlPlayback("guest")).toBe(false);
     expect(manager.requestControl("guest")?.controlRequests).toContain(guest.id);
-    expect(manager.decideControl("host", guest.id, true)?.approvedControllerIds).toContain(guest.id);
+    expect(manager.updateVideo("guest", "play", 13)).toBeNull();
+    expect(manager.decideControl("host", guest.id, "approve")?.approvedControllerIds).toContain(guest.id);
+    expect(manager.canControlPlayback("guest")).toBe(true);
+    expect(manager.setSource("guest", { provider: "html5", mode: "url", url: "https://example.com/guest.mp4" })?.updatedBy).toBe(guest.id);
     expect(manager.updateVideo("guest", "play", 13)?.updatedBy).toBe(guest.id);
-    expect(manager.decideControl("host", guest.id, false)?.approvedControllerIds).toHaveLength(0);
+    expect(manager.decideControl("host", guest.id, "revoke")?.approvedControllerIds).toHaveLength(0);
+    expect(manager.canControlPlayback("guest")).toBe(false);
     expect(manager.updateVideo("guest", "pause", 13)).toBeNull();
+    expect(manager.setSource("guest", { provider: "rutube", videoId: "7716bd3e665725c3c008ae7ab4ff02e2", accessKey: null, originalUrl: "https://rutube.ru/video/7716bd3e665725c3c008ae7ab4ff02e2/" })).toBeNull();
+    expect(manager.requestControl("guest")?.controlRequests).toContain(guest.id);
+    expect(manager.decideControl("host", guest.id, "reject")?.controlRequests).toHaveLength(0);
+    expect(manager.canControlPlayback("host")).toBe(true);
+  });
+
+  it("rejects Guest mode changes and always keeps host-stream sources Host-only", () => {
+    const manager = new RoomManager();
+    const room = manager.create("host", "Host");
+    const token = manager.getCredentials("host")!.roomToken;
+    manager.join(room.id, "guest", "Guest", token);
+    expect(manager.setControlMode("guest", "host-only")).toBeNull();
+    expect(manager.get(room.id)?.controlMode).toBe("everyone");
+    const hostStream = { provider: "html5", mode: "host-stream", fileName: "movie.mp4", streamId: "stream-id" } as const;
+    expect(manager.setSource("guest", hostStream)).toBeNull();
+    expect(manager.setSource("guest", { provider: "html5", mode: "local", fileName: "private.mp4" })).toBeNull();
+    expect(manager.setSource("guest", { provider: "html5", mode: "p2p-movie", fileName: "private.mp4", size: 1, duration: 1, mimeCodec: "video/mp4", codecs: ["avc1"], width: null, height: null, sourceId: "a".repeat(32) })).toBeNull();
+    expect(manager.setSource("host", hostStream)?.source).toMatchObject({ mode: "host-stream" });
   });
 
   it("persists RUTUBE, chat and authoritative state for late participants", () => {

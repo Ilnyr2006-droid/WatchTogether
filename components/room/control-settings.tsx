@@ -32,8 +32,8 @@ export function ControlSettings({ socket, room, participantId, isHost, canContro
           return <div key={id} className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.04] px-3 py-2 text-sm">
             <span>{participant.username} просит управление</span>
             <span className="flex gap-2">
-              <button className="text-emerald-300 hover:text-emerald-200" onClick={() => socket.emit("room:control-decision", { participantId: id, approved: true })}>Разрешить</button>
-              <button className="text-slate-400 hover:text-white" onClick={() => socket.emit("room:control-decision", { participantId: id, approved: false })}>Отклонить</button>
+              <button className="text-emerald-300 hover:text-emerald-200" onClick={() => socket.emit("room:control-approve", { participantId: id })}>Разрешить</button>
+              <button className="text-slate-400 hover:text-white" onClick={() => socket.emit("room:control-reject", { participantId: id })}>Отклонить</button>
             </span>
           </div>;
         })}
@@ -42,7 +42,7 @@ export function ControlSettings({ socket, room, participantId, isHost, canContro
           if (!participant) return null;
           return <div key={id} className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.04] px-3 py-2 text-sm">
             <span>{participant.username}: управление разрешено</span>
-            <button className="text-amber-300 hover:text-amber-200" onClick={() => socket.emit("room:control-decision", { participantId: id, approved: false })}>Отозвать</button>
+            <button className="text-amber-300 hover:text-amber-200" onClick={() => socket.emit("room:control-revoke", { participantId: id })}>Отозвать</button>
           </div>;
         })}
       </div>}

@@ -3,6 +3,7 @@ import { Server } from "socket.io";
 import type {
   ClientToServerEvents,
   InterServerEvents,
+  RoomControlAction,
   ServerToClientEvents,
   SocketData,
 } from "@/types/realtime";
@@ -18,7 +19,7 @@ import {
   videoActionSchema,
   videoSourceSelectionSchema,
   roomControlModeSchema,
-  roomControlDecisionSchema,
+  roomControlTargetSchema,
 } from "./validation";
 import { parseSubmittedVideoUrl } from "@/lib/video-source";
 import type {
@@ -139,13 +140,16 @@ export function attachSocketServer(
       const state = rooms.requestControl(socket.id);
       if (state) io.to(state.id).emit("room:state", state);
     });
-    socket.on("room:control-decision", (payload) => {
-      const parsed = roomControlDecisionSchema.safeParse(payload);
+    const handleControlDecision = (action: RoomControlAction) => (payload: unknown) => {
+      const parsed = roomControlTargetSchema.safeParse(payload);
       if (!parsed.success) return;
-      const state = rooms.decideControl(socket.id, parsed.data.participantId, parsed.data.approved);
+      const state = rooms.decideControl(socket.id, parsed.data.participantId, action);
       if (!state) return fail("Только Host может выдавать разрешения", "FORBIDDEN");
       io.to(state.id).emit("room:state", state);
-    });
+    };
+    socket.on("room:control-approve", handleControlDecision("approve"));
+    socket.on("room:control-reject", handleControlDecision("reject"));
+    socket.on("room:control-revoke", handleControlDecision("revoke"));
 
     socket.on("participant:update", (payload) => {
       if (!participantRate.allow(socket.id)) return;
@@ -199,6 +203,8 @@ export function attachSocketServer(
       if (!videoRate.allow(socket.id)) return;
       const parsed = videoActionSchema.safeParse(payload);
       if (!parsed.success) return;
+      if (!rooms.canControlPlayback(socket.id))
+        return fail("Нет разрешения управлять воспроизведением", "FORBIDDEN");
       const video = rooms.updateVideo(
         socket.id,
         parsed.data.action,
