@@ -2,6 +2,19 @@ import type { VideoState } from "@/types/realtime";
 
 export const SYNC_THRESHOLD_SECONDS = 0.75;
 
+export function isNewerVideoRevision(appliedRevision: number, incomingRevision: number) {
+  return incomingRevision > appliedRevision;
+}
+
+export function shouldEmitPlaybackAction(
+  action: "play" | "pause",
+  desiredPlaying: boolean | null,
+  applyingRemote: boolean,
+) {
+  if (applyingRemote) return false;
+  return desiredPlaying !== (action === "play");
+}
+
 export function effectiveVideoTime(video: VideoState, now = Date.now()): number {
   if (!video.playing) return video.currentTime;
   return video.currentTime + Math.max(0, now - video.updatedAt) / 1000;

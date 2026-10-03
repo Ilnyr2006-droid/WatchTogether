@@ -11,6 +11,7 @@ import { useSocket } from "@/hooks/use-socket";
 import { useVoiceChat } from "@/hooks/use-voice-chat";
 import { VoiceControls } from "@/components/voice/voice-controls";
 import { ControlSettings } from "@/components/room/control-settings";
+import { isNewerVideoRevision } from "@/lib/video-sync";
 import type { Participant, RoomState, VideoState } from "@/types/realtime";
 
 export default function RoomPage() {
@@ -90,9 +91,9 @@ export default function RoomPage() {
   }, [connected, ownerToken, params.roomId, roomToken, router, socket, username]);
 
   useEffect(() => {
-    const state = (next: RoomState) => setRoom((current) => current && next.video.revision < current.video.revision ? { ...next, video: current.video } : next);
+    const state = (next: RoomState) => setRoom((current) => current && !isNewerVideoRevision(current.video.revision, next.video.revision) ? { ...next, video: current.video } : next);
     const videoState = (video: VideoState) =>
-      setRoom((current) => current && video.revision >= current.video.revision ? { ...current, video } : current);
+      setRoom((current) => current && isNewerVideoRevision(current.video.revision, video.revision) ? { ...current, video } : current);
     const joined = (participant: Participant) =>
       setRoom((current) =>
         current

@@ -74,6 +74,27 @@ test("creates room, joins/reconnects both roles, keeps chat and synchronizes rev
   await emit(guest, "video:action", { action: "seek", currentTime: 37 });
   await expect(host.getByTestId("video-state")).toHaveAttribute("data-time", "37");
 
+  await guest.evaluate(() => {
+    const browserWindow = window as unknown as {
+      __watchTogetherSocket?: { emit: (...args: unknown[]) => unknown };
+      __videoActionEmits?: number;
+    };
+    const socket = browserWindow.__watchTogetherSocket;
+    if (!socket) throw new Error("E2E socket hook is unavailable");
+    const originalEmit = socket.emit.bind(socket);
+    browserWindow.__videoActionEmits = 0;
+    socket.emit = (...args: unknown[]) => {
+      if (args[0] === "video:action") browserWindow.__videoActionEmits! += 1;
+      return originalEmit(...args);
+    };
+  });
+  await emit(host, "video:action", { action: "play", currentTime: 38 });
+  await expect(guest.getByTestId("video-state")).toHaveAttribute("data-playing", "true");
+  await emit(host, "video:action", { action: "pause", currentTime: 39 });
+  await expect(guest.getByTestId("video-state")).toHaveAttribute("data-playing", "false");
+  await guest.waitForTimeout(600);
+  expect(await guest.evaluate(() => (window as unknown as { __videoActionEmits?: number }).__videoActionEmits)).toBe(0);
+
   await Promise.all([
     emit(host, "video:action", { action: "play", currentTime: 39 }),
     emit(guest, "video:action", { action: "pause", currentTime: 40 }),

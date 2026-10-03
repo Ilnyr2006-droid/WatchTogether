@@ -87,10 +87,12 @@ describe("RoomManager", () => {
     const credentials = manager.getCredentials("host")!;
     manager.setSource("host", { provider: "rutube", videoId: "7716bd3e665725c3c008ae7ab4ff02e2", accessKey: null, originalUrl: "https://rutube.ru/video/7716bd3e665725c3c008ae7ab4ff02e2/" });
     manager.updateVideo("host", "pause", 42);
+    const latestRevision = manager.get(room.id)!.video.revision;
     manager.addMessage("host", "Saved in memory");
     const joined = manager.join(room.id, "guest", "Guest", credentials.roomToken)!.room;
     expect(joined.video.source).toMatchObject({ provider: "rutube", videoId: "7716bd3e665725c3c008ae7ab4ff02e2" });
     expect(joined.video.currentTime).toBe(42);
+    expect(joined.video.revision).toBe(latestRevision);
     expect(joined.video.updatedBy).toBe(credentials.participantId);
     expect(joined.messages[0].text).toBe("Saved in memory");
   });
@@ -100,6 +102,7 @@ describe("RoomManager", () => {
     const room = manager.create("host", "Host");
     const participantId = manager.getCredentials("host")!.participantId!;
     let revision = room.video.revision;
+    expect(revision).toBe(0);
     const source = { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" } as const;
     expect(manager.setSource("host", source)?.revision).toBe(++revision);
     for (const action of ["play", "pause", "seek", "sync"] as const) {
@@ -109,6 +112,20 @@ describe("RoomManager", () => {
     }
     expect(manager.clearSource(room.id, participantId)?.revision).toBe(++revision);
     expect(manager.get(room.id)?.video.updatedBy).toBe(participantId);
+  });
+
+  it("serializes rapid actions from different participants into one final authoritative state", () => {
+    const manager = new RoomManager();
+    const room = manager.create("host", "Host");
+    const credentials = manager.getCredentials("host")!;
+    manager.setSource("host", { provider: "html5", mode: "url", url: "https://example.com/movie.mp4" });
+    const guest = manager.join(room.id, "guest", "Guest", credentials.roomToken)!.room.participants.find((person) => person.socketId === "guest")!;
+    const play = manager.updateVideo("host", "play", 10)!;
+    const pause = manager.updateVideo("guest", "pause", 14)!;
+    const seek = manager.updateVideo("host", "seek", 27)!;
+    expect([play.revision, pause.revision, seek.revision]).toEqual([2, 3, 4]);
+    expect(manager.get(room.id)?.video).toMatchObject({ revision: 4, currentTime: 27, playing: false, updatedBy: credentials.participantId });
+    expect(guest.id).not.toBe(credentials.participantId);
   });
 
   it("authorizes stream tokens only while their socket remains connected", () => {

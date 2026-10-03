@@ -2,7 +2,7 @@
 
 import { RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
-import { effectiveVideoTime, needsTimeCorrection } from "@/lib/video-sync";
+import { effectiveVideoTime, isNewerVideoRevision, needsTimeCorrection } from "@/lib/video-sync";
 import { classifyRutubePlayerError, type RutubePlayerStatus } from "@/lib/rutube-player-state";
 import type { ClientToServerEvents, ServerToClientEvents, VideoState } from "@/types/realtime";
 
@@ -37,12 +37,18 @@ export function useRutubePlayer({ iframeRef, socket, isHost, canControl, video }
   const currentTimeRef = useRef(0);
   const playingRef = useRef(video.playing);
   const latestVideoRef = useRef(video);
+  const latestAppliedRevision = useRef(-1);
   const suppressUntilRef = useRef(0);
   const lastSampleRef = useRef<{ time: number; at: number } | null>(null);
   const lastSeekEmitRef = useRef(0);
   const lastStateEmitRef = useRef<"playing" | "paused" | null>(null);
 
-  useEffect(() => { latestVideoRef.current = video; playingRef.current = video.playing; }, [video]);
+  useEffect(() => {
+    if (video.revision >= latestVideoRef.current.revision) {
+      latestVideoRef.current = video;
+      playingRef.current = video.playing;
+    }
+  }, [video]);
 
   const command = useCallback((payload: RutubeCommand) => {
     if (!readyRef.current || !iframeRef.current?.contentWindow) return false;
@@ -52,6 +58,8 @@ export function useRutubePlayer({ iframeRef, socket, isHost, canControl, video }
 
   const applyRemoteState = useCallback((state: VideoState, force = false) => {
     if (!readyRef.current || advertisingRef.current) return;
+    if (state.revision < latestAppliedRevision.current || (!force && !isNewerVideoRevision(latestAppliedRevision.current, state.revision))) return;
+    latestAppliedRevision.current = state.revision;
     suppressUntilRef.current = Date.now() + 1_500;
     playingRef.current = state.playing;
     lastStateEmitRef.current = state.playing ? "playing" : "paused";
