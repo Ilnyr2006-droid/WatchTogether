@@ -1,0 +1,47 @@
+# Plan — WatchTogether architecture review recommendations
+
+All tasks are proposed and pending owner confirmation. T-01 verifies deployment-layer behavior before changing headers or logging. T-02 establishes capacity and restart targets before architecture expansion.
+
+- T-01 — Contain bearer credential exposure
+  - files: `app/room/[roomId]/page.tsx`, `components/video/html5-player.tsx`, `next.config.ts`, deployed ingress logging configuration
+  - action: audit room/stream URL lifetimes and effective referrer/access-log policy; clean the room invite query after successful join; choose a scoped stream authorization mechanism or redact query credentials at ingress.
+  - verify: inspect a controlled request/log sample and browser referrer behavior; assert credentials do not enter service-worker caches.
+  - done: reusable invite flow still works, while owner/session/stream secrets are neither logged nor leaked as referrers.
+  - satisfies: R-01, R-08
+- T-02 — Measure room and deployment envelope
+  - files: `hooks/use-voice-chat.ts`, `hooks/use-p2p-movie.ts`, `server/room-manager.ts`, E2E/load fixtures
+  - action: measure voice mesh connection setup/recovery, Host upload, and room-state event cost for candidate room sizes; confirm whether restart loss and a single process are acceptable.
+  - verify: repeatable local load run records participant count, setup time, transfer/connection outcomes, CPU, and memory.
+  - done: owner confirms a maximum room size and restart-survival target based on evidence.
+  - satisfies: R-02, R-03, R-09, R-10
+- T-03 — Enforce the confirmed room ceiling
+  - depends on: T-02
+  - files: `server/room-manager.ts`, `server/socket-server.ts`, `server/validation.ts`, room admission tests
+  - action: reject excess joins server-side with a stable `ROOM_FULL` error before allocating participant/session state.
+  - verify: boundary tests at limit and limit+1, including reconnect and concurrent joins.
+  - done: room size never exceeds the confirmed ceiling and existing participants/reconnects remain valid.
+  - satisfies: R-03, R-09
+- T-04 — Cover voice realtime lifecycle
+  - files: `tests/e2e/voice.spec.ts`, `playwright.config.ts`, voice test helpers
+  - action: add local deterministic voice signaling tests for offer/answer/candidate, peer creation, leave, reconnect, and cleanup.
+  - verify: test mode uses fake audio and no public ICE/TURN; all expected peer resources close after departure.
+  - done: the suite proves voice negotiation and lifecycle independently of movie DataChannel tests.
+  - satisfies: R-04
+- T-05 — Verify real worker update and cache policy
+  - files: `public/sw.js`, `app/pwa-runtime.tsx`, `tests/e2e/pwa-media.spec.ts`
+  - action: derive cache version from the app build/release identity, narrow or validate static cache paths, and test activation across two worker versions.
+  - verify: install version A, serve version B, wait for actual activation/controller change, and assert one reload, old cache removal, and exact cache allowlist.
+  - done: a real update transition is tested without synthetic event dispatch and no dynamic room/API resource is cached.
+  - satisfies: R-05
+- T-06 — Clear Media Session on teardown
+  - files: `hooks/use-media-session.ts`, `tests/e2e/pwa-media.spec.ts`, `tests/mobile-media.test.ts`
+  - action: reset metadata/playback state when the active player unmounts or its source is removed, while preserving action handler cleanup.
+  - verify: navigate out of a playing room and assert metadata, playback state, and registered handlers are cleared.
+  - done: OS/browser controls cannot display stale room metadata after leaving the room.
+  - satisfies: R-06
+- T-07 — Add secret-safe operational signals
+  - files: `server/socket-server.ts`, `server/room-manager.ts`, deployment health/metrics configuration
+  - action: emit low-cardinality counters for rooms, participants, grace expiries, stream failures, and WebRTC outcomes; document the supported process count.
+  - verify: exercise join/leave, disconnect expiry, and failed stream/peer paths; scan emitted fields for credential/URL/SDP values.
+  - done: operators can distinguish capacity/reconnect/media incidents without collecting secrets.
+  - satisfies: R-02, R-07, R-10

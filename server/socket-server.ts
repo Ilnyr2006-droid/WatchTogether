@@ -1,8 +1,10 @@
 import type { Server as HttpServer } from "node:http";
+import { randomBytes } from "node:crypto";
 import { Server } from "socket.io";
 import type {
   ClientToServerEvents,
   InterServerEvents,
+  RoomControlAction,
   ServerToClientEvents,
   SocketData,
 } from "@/types/realtime";
@@ -17,6 +19,12 @@ import {
   signalDescriptionSchema,
   videoActionSchema,
   videoSourceSelectionSchema,
+  roomControlModeSchema,
+  roomControlTargetSchema,
+  playlistAddRemoteSchema,
+  playlistItemSchema,
+  playlistPlaybackSchema,
+  playlistMoveSchema,
 } from "./validation";
 import { parseSubmittedVideoUrl } from "@/lib/video-source";
 import type {
@@ -26,11 +34,12 @@ import type {
 } from "@/types/realtime";
 import { canRelaySignal } from "./signaling";
 import { HostStreamRegistry } from "./host-stream-registry";
+import { LocalMediaRegistry } from "./local-media-registry";
 import { FailedAttemptLimiter } from "./failed-attempt-limit";
 
 export function attachSocketServer(
   httpServer: HttpServer,
-  dependencies: { rooms?: RoomManager; streams?: HostStreamRegistry } = {},
+  dependencies: { rooms?: RoomManager; streams?: HostStreamRegistry; localMedia?: LocalMediaRegistry } = {},
 ) {
   const io = new Server<
     ClientToServerEvents,
@@ -43,6 +52,7 @@ export function attachSocketServer(
   });
   const rooms = dependencies.rooms ?? new RoomManager();
   const streams = dependencies.streams ?? new HostStreamRegistry();
+  const localMedia = dependencies.localMedia ?? new LocalMediaRegistry();
   const chatRate = new RateLimiter(8, 10_000);
   const participantRate = new RateLimiter(20, 10_000);
   const videoRate = new RateLimiter(40, 10_000);
@@ -51,7 +61,7 @@ export function attachSocketServer(
   const movieDescriptionRate = new RateLimiter(20, 10_000);
   const movieCandidateRate = new RateLimiter(250, 10_000);
   const failedJoinRate = new FailedAttemptLimiter(8, 60_000);
-  const pendingDisconnectLeaves = new Map<string, ReturnType<typeof setTimeout>>();
+  const pendingDisconnectLeaves = new Map<string, { roomId: string; timer: ReturnType<typeof setTimeout> }>();
 
   io.on("connection", (socket) => {
     const fail = (message: string, code = "INVALID_REQUEST") =>
@@ -65,20 +75,16 @@ export function attachSocketServer(
       const room = rooms.create(socket.id, parsed.data.username);
       const roomToken = rooms.getRoomTokenForHost(socket.id);
       const ownerToken = rooms.getOwnerTokenForHost(socket.id);
-      if (!roomToken || !ownerToken)
+      const credentials = rooms.getCredentials(socket.id);
+      if (!roomToken || !ownerToken || !credentials)
         return ack({ ok: false, error: "Не удалось защитить комнату" });
-      socket.data = { roomId: room.id, username: parsed.data.username };
+      socket.data = { roomId: room.id, username: parsed.data.username, participantId: credentials.participantId };
       socket.join(room.id);
-      ack({ ok: true, data: { roomId: room.id, roomToken, ownerToken } });
+      ack({ ok: true, data: { roomId: room.id, roomToken, ownerToken, participantId: credentials.participantId, sessionToken: credentials.sessionToken, isOwner: true } });
       socket.emit("room:state", room);
     });
 
     socket.on("room:join", (payload, ack) => {
-      const pendingLeave = pendingDisconnectLeaves.get(socket.id);
-      if (pendingLeave) {
-        clearTimeout(pendingLeave);
-        pendingDisconnectLeaves.delete(socket.id);
-      }
       const attemptKey = socket.handshake.address || "unknown";
       if (failedJoinRate.isBlocked(attemptKey))
         return ack({
@@ -95,14 +101,14 @@ export function attachSocketServer(
       }
       if (socket.data.roomId && socket.data.roomId !== parsed.data.roomId)
         leaveCurrent();
-      const state = rooms.join(
+      const joined = rooms.join(
         parsed.data.roomId,
         socket.id,
         parsed.data.username,
         parsed.data.roomToken,
-        parsed.data.ownerToken,
+        { ownerToken: parsed.data.ownerToken, participantId: parsed.data.participantId, sessionToken: parsed.data.sessionToken },
       );
-      if (!state) {
+      if (!joined) {
         failedJoinRate.recordFailure(attemptKey);
         return ack({
           ok: false,
@@ -110,24 +116,51 @@ export function attachSocketServer(
         });
       }
       failedJoinRate.clear(attemptKey);
+      const { room: state, participantId } = joined;
+      const pendingLeave = pendingDisconnectLeaves.get(participantId);
+      if (pendingLeave) { clearTimeout(pendingLeave.timer); pendingDisconnectLeaves.delete(participantId); }
       socket.data = {
         roomId: parsed.data.roomId,
         username: parsed.data.username,
+        participantId,
       };
       socket.join(parsed.data.roomId);
+      if (joined.replacedSocketId) {
+        streams.closeParticipant(joined.replacedSocketId);
+        localMedia.closeParticipant(joined.replacedSocketId);
+      }
       const streamToken = rooms.issueStreamToken(socket.id);
       if (!streamToken)
         return ack({ ok: false, error: "Не удалось создать сессию комнаты" });
-      ack({ ok: true, data: { room: state, streamToken } });
+      ack({ ok: true, data: { room: state, streamToken, participantId, sessionToken: joined.sessionToken, isOwner: rooms.isRoomOwner(socket.id) } });
       socket.emit("room:state", state);
-      const participant = state.participants.find(
-        (item) => item.socketId === socket.id,
-      );
-      if (participant)
-        socket.to(parsed.data.roomId).emit("participant:joined", participant);
+      socket.to(parsed.data.roomId).emit("room:state", state);
+      if (joined.replacedSocketId) io.sockets.sockets.get(joined.replacedSocketId)?.disconnect(true);
     });
 
-    socket.on("room:leave", leaveCurrent);
+    socket.on("room:leave", (ack) => { leaveCurrent(); ack?.({ ok: true, data: undefined }); });
+
+    socket.on("room:control-mode", (payload) => {
+      const parsed = roomControlModeSchema.safeParse(payload);
+      if (!parsed.success) return;
+      const state = rooms.setControlMode(socket.id, parsed.data.mode);
+      if (!state) return fail("Только Host может менять режим управления", "FORBIDDEN");
+      io.to(state.id).emit("room:state", state);
+    });
+    socket.on("room:control-request", () => {
+      const state = rooms.requestControl(socket.id);
+      if (state) io.to(state.id).emit("room:state", state);
+    });
+    const handleControlDecision = (action: RoomControlAction) => (payload: unknown) => {
+      const parsed = roomControlTargetSchema.safeParse(payload);
+      if (!parsed.success) return;
+      const state = rooms.decideControl(socket.id, parsed.data.participantId, action);
+      if (!state) return fail("Только Host может выдавать разрешения", "FORBIDDEN");
+      io.to(state.id).emit("room:state", state);
+    };
+    socket.on("room:control-approve", handleControlDecision("approve"));
+    socket.on("room:control-reject", handleControlDecision("reject"));
+    socket.on("room:control-revoke", handleControlDecision("revoke"));
 
     socket.on("participant:update", (payload) => {
       if (!participantRate.allow(socket.id)) return;
@@ -166,11 +199,13 @@ export function attachSocketServer(
       if (!source)
         return fail("Некорректный источник видео", "INVALID_VIDEO_SOURCE");
       const video = rooms.setSource(socket.id, source);
-      if (!video) return fail("Только host может менять видео", "FORBIDDEN");
+      if (!video) return fail("Нет разрешения менять этот источник видео", "FORBIDDEN");
       if (socket.data.roomId) {
         streams.clear(socket.data.roomId);
+        localMedia.closeRoomTransfers(socket.data.roomId);
         io.to(socket.data.roomId).emit("video:state", video);
         const state = rooms.get(socket.data.roomId);
+        if (state) io.to(socket.data.roomId).emit("room:state", state);
         state?.participants.forEach((participant) =>
           io.to(socket.data.roomId!).emit("participant:update", participant),
         );
@@ -181,6 +216,8 @@ export function attachSocketServer(
       if (!videoRate.allow(socket.id)) return;
       const parsed = videoActionSchema.safeParse(payload);
       if (!parsed.success) return;
+      if (!rooms.canControlPlayback(socket.id))
+        return fail("Нет разрешения управлять воспроизведением", "FORBIDDEN");
       const video = rooms.updateVideo(
         socket.id,
         parsed.data.action,
@@ -190,6 +227,109 @@ export function attachSocketServer(
       if (socket.data.roomId)
         io.to(socket.data.roomId).emit("video:state", video);
     });
+
+    socket.on("playlist:add-remote", (payload) => {
+      if (!videoRate.allow(socket.id)) return;
+      const parsed = playlistAddRemoteSchema.safeParse(payload);
+      if (!parsed.success) return fail("Некорректная ссылка для очереди", "INVALID_PLAYLIST_ITEM");
+      const source = parseSubmittedVideoUrl(parsed.data.input);
+      if (!source) return fail("Нужна поддерживаемая ссылка RUTUBE или видеофайла", "INVALID_VIDEO_URL");
+      const state = rooms.addRemotePlaylistItem(socket.id, parsed.data.input, source);
+      if (!state) return fail("Нет разрешения добавлять видео в очередь", "FORBIDDEN");
+      io.to(state.id).emit("room:state", state);
+    });
+
+    socket.on("playlist:play", (payload) => { void playPlaylistItem(payload); });
+
+    async function playPlaylistItem(payload: unknown) {
+      const parsed = playlistItemSchema.safeParse(payload);
+      if (!parsed.success) return fail("Некорректный элемент очереди", "INVALID_PLAYLIST_ITEM");
+      const room = rooms.getBySocket(socket.id);
+      if (!room || !rooms.isHost(socket.id)) return fail("Запуск очереди доступен только Host", "FORBIDDEN");
+      const item = room && rooms.getPlaylistItem(room.id, parsed.data.itemId);
+      if (!room || !item) return fail("Видео не найдено в очереди", "INVALID_PLAYLIST_ITEM");
+      let source: VideoSource | null = null;
+      if (item.source.type === "remote") source = parseSubmittedVideoUrl(item.source.input);
+      else {
+        const available = await localMedia.resolveForStream(room.id, item.source.mediaId);
+        if (!available) return reportUnavailable(room.id, item.id, item.title);
+        source = { provider: "html5", mode: "host-stream", fileName: item.source.fileName, mediaId: item.source.mediaId, streamId: randomBytes(12).toString("base64url") };
+      }
+      if (!source) return fail("Источник из очереди больше не поддерживается", "INVALID_VIDEO_SOURCE");
+      const video = rooms.playPlaylistItem(socket.id, item.id, source);
+      if (!video) return fail("Запуск очереди доступен только Host", "FORBIDDEN");
+      streams.clear(room.id);
+      localMedia.closeRoomTransfers(room.id);
+      io.to(room.id).emit("video:state", video);
+      const state = rooms.get(room.id);
+      if (state) io.to(room.id).emit("room:state", state);
+    }
+
+    socket.on("playlist:remove", (payload) => {
+      const parsed = playlistItemSchema.safeParse(payload);
+      if (!parsed.success) return fail("Некорректный элемент очереди", "INVALID_PLAYLIST_ITEM");
+      const before = rooms.getBySocket(socket.id);
+      const state = rooms.removePlaylistItem(socket.id, parsed.data.itemId);
+      if (!state) return fail("Удалять видео из очереди может только Host", "FORBIDDEN");
+      if (before?.video.revision !== state.video.revision) io.to(state.id).emit("video:state", state.video);
+      if (before?.video.revision !== state.video.revision) localMedia.closeRoomTransfers(state.id);
+      io.to(state.id).emit("room:state", state);
+    });
+
+    socket.on("playlist:move", (payload) => {
+      const parsed = playlistMoveSchema.safeParse(payload);
+      if (!parsed.success) return fail("Некорректный элемент очереди", "INVALID_PLAYLIST_ITEM");
+      const state = rooms.movePlaylistItem(socket.id, parsed.data.itemId, parsed.data.direction);
+      if (!state) return fail("Менять порядок очереди может только Host", "FORBIDDEN");
+      io.to(state.id).emit("room:state", state);
+    });
+
+    socket.on("playlist:clear", () => {
+      const before = rooms.getBySocket(socket.id);
+      const state = rooms.clearPlaylist(socket.id);
+      if (!state) return fail("Очищать очередь может только Host", "FORBIDDEN");
+      if (before?.video.revision !== state.video.revision) io.to(state.id).emit("video:state", state.video);
+      if (before?.video.revision !== state.video.revision) localMedia.closeRoomTransfers(state.id);
+      io.to(state.id).emit("room:state", state);
+    });
+
+    socket.on("playlist:next", (payload) => { void advancePlaylist(payload); });
+    socket.on("playlist:ended", (payload) => { void advancePlaylist(payload); });
+
+    async function advancePlaylist(payload: unknown) {
+      const parsed = playlistPlaybackSchema.safeParse(payload);
+      if (!parsed.success) return fail("Некорректный элемент очереди", "INVALID_PLAYLIST_ITEM");
+      const room = rooms.getBySocket(socket.id);
+      if (!room || !rooms.isHost(socket.id)) return fail("Переключать очередь может только Host", "FORBIDDEN");
+      const next = rooms.getNextPlaylistItem(room.id, parsed.data.itemId, parsed.data.playbackId);
+      // A duplicate or stale ended event is intentionally ignored.
+      if (!next && rooms.get(room.id)?.currentPlaylistItemId !== parsed.data.itemId) return;
+      let nextSource: VideoSource | null = null;
+      if (next) {
+        if (next.source.type === "remote") nextSource = parseSubmittedVideoUrl(next.source.input);
+        else if (await localMedia.resolveForStream(room.id, next.source.mediaId)) {
+          nextSource = { provider: "html5", mode: "host-stream", fileName: next.source.fileName, mediaId: next.source.mediaId, streamId: randomBytes(12).toString("base64url") };
+        } else {
+          const current = rooms.get(room.id)?.video;
+          if (current) {
+            const paused = rooms.updateVideo(socket.id, "pause", current.currentTime);
+            if (paused) io.to(room.id).emit("video:state", paused);
+          }
+          return reportUnavailable(room.id, next.id, next.title);
+        }
+        if (!nextSource) return fail("Следующий источник больше не поддерживается", "INVALID_VIDEO_SOURCE");
+      }
+      const result = rooms.advancePlaylist(socket.id, parsed.data.itemId, parsed.data.playbackId, nextSource);
+      if (!result) return;
+      streams.clear(room.id);
+      localMedia.closeRoomTransfers(room.id);
+      io.to(room.id).emit("video:state", result.video);
+      io.to(room.id).emit("room:state", result.state);
+    }
+
+    function reportUnavailable(roomId: string, itemId: string, title: string) {
+      io.to(roomId).emit("room:playlist-error", { itemId, message: `Файл «${title}» больше недоступен. Выберите его снова или удалите из очереди.` });
+    }
 
     socket.on("chat:send", (payload, ack) => {
       if (!chatRate.allow(socket.id))
@@ -275,15 +415,17 @@ export function attachSocketServer(
 
     function leaveCurrent() {
       const current = rooms.getBySocket(socket.id);
+      const participantId = rooms.getParticipantId(socket.id);
       streams.closeParticipant(socket.id);
+      localMedia.closeParticipant(socket.id);
       const stopsHostMedia =
-        current?.hostId === socket.id &&
+        current?.hostId === participantId &&
         current.video.source?.provider === "html5" &&
-        (current.video.source.mode === "host-stream" ||
+        ((current.video.source.mode === "host-stream" && !current.video.source.mediaId) ||
           current.video.source.mode === "p2p-movie");
       if (current && stopsHostMedia) {
         streams.clear(current.id);
-        const stoppedVideo = rooms.clearSource(current.id);
+        const stoppedVideo = rooms.clearSource(current.id, participantId ?? null);
         if (stoppedVideo) io.to(current.id).emit("video:state", stoppedVideo);
         socket
           .to(current.id)
@@ -296,30 +438,46 @@ export function attachSocketServer(
       }
       const result = rooms.leave(socket.id);
       if (!result) return;
-      if (!result.hostId) streams.clear(result.roomId);
+      if (participantId) {
+        const pending = pendingDisconnectLeaves.get(participantId);
+        if (pending) { clearTimeout(pending.timer); pendingDisconnectLeaves.delete(participantId); }
+      }
+      if (!result.hostId) { streams.clear(result.roomId); localMedia.clear(result.roomId); }
       socket.leave(result.roomId);
       socket.data.roomId = undefined;
+      socket.data.participantId = undefined;
       io.to(result.roomId).emit("participant:left", {
-        socketId: socket.id,
+        participantId: result.participantId,
         hostId: result.hostId,
       });
-      if (result.hostId) {
-        const state = rooms.get(result.roomId);
-        if (state) io.to(result.roomId).emit("room:state", state);
-      }
+      const state = rooms.get(result.roomId);
+      if (state) io.to(result.roomId).emit("room:state", state);
     }
 
     socket.on("disconnect", () => {
-      // A browser refresh creates a new Socket.IO connection. Keep this
-      // socket in the room briefly so the refreshed page can join again
-      // instead of deleting the room or immediately transferring the host.
-      if (rooms.getBySocket(socket.id)) {
+      const disconnected = rooms.disconnect(socket.id);
+      if (disconnected) {
+        const { room, participant } = disconnected;
         streams.closeParticipant(socket.id);
+        localMedia.closeParticipant(socket.id);
         const timer = setTimeout(() => {
-          pendingDisconnectLeaves.delete(socket.id);
-          leaveCurrent();
+          pendingDisconnectLeaves.delete(participant.id);
+          const current = rooms.get(room.id);
+          const source = current?.video.source;
+          if (current?.hostId === participant.id && source?.provider === "html5" && ((source.mode === "host-stream" && !source.mediaId) || source.mode === "p2p-movie")) {
+            streams.clear(room.id);
+            const stoppedVideo = rooms.clearSource(room.id, participant.id);
+            if (stoppedVideo) io.to(room.id).emit("video:state", stoppedVideo);
+            io.to(room.id).emit("room:error", { code: "HOST_STREAM_STOPPED", message: source.mode === "p2p-movie" ? "Host не переподключился. P2P-передача фильма остановлена." : "Host не переподключился. Трансляция фильма остановлена." });
+          }
+          const result = rooms.leaveParticipant(room.id, participant.id);
+          if (!result) return;
+          if (!result.hostId) { streams.clear(room.id); localMedia.clear(room.id); }
+          io.to(room.id).emit("participant:left", { participantId: result.participantId, hostId: result.hostId });
+          const next = rooms.get(room.id);
+          if (next) io.to(room.id).emit("room:state", next);
         }, 30_000);
-        pendingDisconnectLeaves.set(socket.id, timer);
+        pendingDisconnectLeaves.set(participant.id, { roomId: room.id, timer });
       }
       chatRate.clear(socket.id);
       participantRate.clear(socket.id);
@@ -331,5 +489,5 @@ export function attachSocketServer(
     });
   });
 
-  return { io, rooms, streams };
+  return { io, rooms, streams, localMedia };
 }

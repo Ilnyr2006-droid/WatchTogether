@@ -44,4 +44,45 @@ describe("host stream lifecycle", () => {
     realtime.io.close();
     await new Promise<void>((resolve) => http.close(() => resolve()));
   });
+
+  it("invalidates the replaced Host stream token and closes its active transfer on session takeover", async () => {
+    const rooms = new RoomManager(); const streams = new HostStreamRegistry(); const http = createServer();
+    const realtime = attachSocketServer(http, { rooms, streams });
+    await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+    const baseUrl = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+    const oldHost = createClient(baseUrl); const newHost = createClient(baseUrl); clients.push(oldHost, newHost);
+
+    try {
+      await Promise.all([oldHost, newHost].map((client) => new Promise<void>((resolve) => client.on("connect", () => resolve()))));
+      const created = await new Promise<{ ok: true; data: { roomId: string; roomToken: string; participantId: string; sessionToken: string } }>((resolve) =>
+        oldHost.emit("room:create", { username: "Host" }, (response: { ok: true; data: { roomId: string; roomToken: string; participantId: string; sessionToken: string } } | { ok: false; error: string }) => resolve(response as { ok: true; data: { roomId: string; roomToken: string; participantId: string; sessionToken: string } })),
+      );
+      const oldStreamToken = rooms.issueStreamToken(oldHost.id!)!;
+      expect(rooms.authorizeStream(created.data.roomId, oldStreamToken)).not.toBeNull();
+      let transferDestroyed = false;
+      streams.track(created.data.roomId, oldHost.id!, { destroy: () => { transferDestroyed = true; } });
+      const oldSocketDisconnected = new Promise<void>((resolve) => oldHost.once("disconnect", () => resolve()));
+
+      const rejoined = await new Promise<{ ok: true; data: { streamToken: string; participantId: string } } | { ok: false; error: string }>((resolve) =>
+        newHost.emit("room:join", {
+          roomId: created.data.roomId,
+          username: "Host",
+          roomToken: created.data.roomToken,
+          participantId: created.data.participantId,
+          sessionToken: created.data.sessionToken,
+        }, (response: { ok: true; data: { streamToken: string; participantId: string } } | { ok: false; error: string }) => resolve(response)),
+      );
+      expect(rejoined.ok).toBe(true);
+      if (!rejoined.ok) throw new Error(rejoined.error);
+      await oldSocketDisconnected;
+
+      expect(rejoined.data.participantId).toBe(created.data.participantId);
+      expect(rooms.authorizeStream(created.data.roomId, oldStreamToken)).toBeNull();
+      expect(rooms.authorizeStream(created.data.roomId, rejoined.data.streamToken)).not.toBeNull();
+      expect(transferDestroyed).toBe(true);
+    } finally {
+      realtime.io.close();
+      await new Promise<void>((resolve) => http.close(() => resolve()));
+    }
+  });
 });

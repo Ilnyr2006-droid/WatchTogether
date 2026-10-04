@@ -50,7 +50,8 @@ interface PeerContext {
   disconnectTimer?: number;
 }
 
-const FALLBACK_ICE: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+const E2E_MODE = typeof document !== "undefined" && document.documentElement.dataset.watchtogetherE2e === "true";
+const FALLBACK_ICE: RTCIceServer[] = E2E_MODE ? [] : [{ urls: "stun:stun.l.google.com:19302" }];
 
 async function sendTransfer(
   context: PeerContext,
@@ -101,6 +102,7 @@ export function useP2PMovie({
   const [speedMbps, setSpeedMbps] = useState(0);
   const [transferredBytes, setTransferredBytes] = useState(0);
   const [route, setRoute] = useState<"DIRECT" | "TURN" | "—">("—");
+  const [iceConfigurationLoaded, setIceConfigurationLoaded] = useState(false);
 
   const processAppendQueue = useCallback(() => {
     const sb = sourceBufferRef.current;
@@ -125,9 +127,9 @@ export function useP2PMovie({
     (start: number) => {
       if (isHost || pendingRequest.current) return;
       const host = participants.find(
-        (participant) => participant.socketId === hostId,
+        (participant) => participant.id === hostId && participant.connected && participant.socketId,
       );
-      const context = host ? peers.current.get(host.socketId) : undefined;
+      const context = host?.socketId ? peers.current.get(host.socketId) : undefined;
       if (
         !context?.control ||
         context.control.readyState !== "open" ||
@@ -384,9 +386,10 @@ export function useP2PMovie({
     void fetch("/api/ice-servers", { cache: "no-store" })
       .then((response) => response.json())
       .then((body: { iceServers?: RTCIceServer[] }) => {
-        if (body.iceServers?.length) iceServers.current = body.iceServers;
+        if (Array.isArray(body.iceServers)) iceServers.current = body.iceServers;
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setIceConfigurationLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -465,17 +468,25 @@ export function useP2PMovie({
   }, [createPeer, socket]);
 
   useEffect(() => {
+    if (!iceConfigurationLoaded) return;
     const ids = new Set(
       participants
-        .filter((participant) => participant.socketId !== socket.id)
-        .map((participant) => participant.socketId),
+        .filter((participant) => participant.connected && participant.socketId && participant.socketId !== socket.id)
+        .map((participant) => participant.socketId!),
     );
     peers.current.forEach((_context, id) => {
       if (!ids.has(id)) cleanupPeer(id);
     });
     if (isHost && file) ids.forEach((id) => createPeer(id));
-    if (!isHost && hostId !== socket.id && ids.has(hostId)) createPeer(hostId);
-  }, [cleanupPeer, createPeer, file, hostId, isHost, participants, socket.id]);
+    const hostSocketId = participants.find((participant) => participant.id === hostId && participant.connected)?.socketId;
+    if (!isHost && hostSocketId && hostSocketId !== socket.id && ids.has(hostSocketId)) createPeer(hostSocketId);
+  }, [cleanupPeer, createPeer, file, hostId, iceConfigurationLoaded, isHost, participants, socket.id]);
+
+  useEffect(() => {
+    const closeStalePeers = () => peers.current.forEach((_context, id) => cleanupPeer(id));
+    socket.on("disconnect", closeStalePeers);
+    return () => { socket.off("disconnect", closeStalePeers); };
+  }, [cleanupPeer, socket]);
 
   useEffect(() => {
     if (isHost) return;

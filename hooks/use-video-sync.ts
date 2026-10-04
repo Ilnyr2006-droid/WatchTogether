@@ -2,48 +2,104 @@
 
 import { RefObject, useCallback, useEffect, useRef } from "react";
 import type { Socket } from "socket.io-client";
-import { effectiveVideoTime, needsTimeCorrection } from "@/lib/video-sync";
+import { effectiveVideoTime, getLocalPlaybackIntent, isNewerVideoRevision, needsTimeCorrection, shouldResyncOnControlLoss } from "@/lib/video-sync";
+import { useMediaSession } from "@/hooks/use-media-session";
 import type { ClientToServerEvents, ServerToClientEvents, VideoState } from "@/types/realtime";
 
-export function useVideoSync({ videoRef, socket, isHost, videoState }: {
+export function useVideoSync({ videoRef, isHost, canControl = true, socket, videoState, roomName }: {
   videoRef: RefObject<HTMLVideoElement | null>;
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
   isHost: boolean;
+  canControl?: boolean;
   videoState: VideoState | null;
+  roomName: string;
 }) {
   const applyingRemote = useRef(false);
+  const latestRevision = useRef(-1);
+  const latestVideoState = useRef<VideoState | null>(null);
+  const applyStateRef = useRef<(state: VideoState, force?: boolean) => Promise<void>>(async () => {});
+  const desiredPlaying = useRef<boolean | null>(null);
+  const unlockTimer = useRef<number | undefined>(undefined);
+  const previousCanControl = useRef(canControl);
 
-  const applyState = useCallback(async (state: VideoState) => {
+  useMediaSession({
+    canControl,
+    roomName,
+    source: videoState?.source ?? null,
+    videoRef,
+    actions: {
+      play: () => {
+        const video = videoRef.current;
+        if (video?.paused) return video.play().catch(() => {});
+      },
+      pause: () => {
+        const video = videoRef.current;
+        if (video && !video.paused) video.pause();
+      },
+      seekTo: (time) => {
+        const video = videoRef.current;
+        if (video && Number.isFinite(time)) video.currentTime = time;
+      },
+    },
+  });
+
+  const applyState = useCallback(async (state: VideoState, force = false) => {
     const video = videoRef.current;
     if (!video) return;
+    if (state.revision < latestRevision.current || (!force && !isNewerVideoRevision(latestRevision.current, state.revision))) return;
+    latestRevision.current = state.revision;
+    latestVideoState.current = state;
+    desiredPlaying.current = state.playing;
     applyingRemote.current = true;
     const target = effectiveVideoTime(state);
     try {
-      if (needsTimeCorrection(video.currentTime, target) && Number.isFinite(target)) video.currentTime = target;
+      if ((force || needsTimeCorrection(video.currentTime, target)) && Number.isFinite(target)) video.currentTime = target;
       if (state.playing && video.paused) await video.play();
       if (!state.playing && !video.paused) video.pause();
     } catch { /* Browser may require a user gesture; controls remain available. */ }
-    window.setTimeout(() => { applyingRemote.current = false; }, 100);
+    if (latestRevision.current !== state.revision) {
+      const newest = latestVideoState.current;
+      if (newest) void applyStateRef.current(newest, true);
+      return;
+    }
+    if (unlockTimer.current) window.clearTimeout(unlockTimer.current);
+    unlockTimer.current = window.setTimeout(() => { applyingRemote.current = false; }, 500);
   }, [videoRef]);
+
+  useEffect(() => { applyStateRef.current = applyState; }, [applyState]);
 
   useEffect(() => {
     if (videoState) void applyState(videoState);
   }, [applyState, videoState]);
 
+  useEffect(() => {
+    const lostControl = shouldResyncOnControlLoss(previousCanControl.current, canControl);
+    previousCanControl.current = canControl;
+    if (lostControl && videoState) void applyState(videoState, true);
+  }, [applyState, canControl, videoState]);
+
+  useEffect(() => () => { if (unlockTimer.current) window.clearTimeout(unlockTimer.current); }, []);
+
   const emit = useCallback((action: "play" | "pause" | "seek") => {
     const video = videoRef.current;
-    if (!video || applyingRemote.current) return;
+    if (!video || !canControl) return;
+    const intent = action === "play" || action === "pause"
+      ? getLocalPlaybackIntent(action, desiredPlaying.current)
+      : null;
+    if (intent && !intent.shouldEmit) return;
+    if (action === "seek" && applyingRemote.current) return;
     socket.emit("video:action", { action, currentTime: video.currentTime });
-  }, [socket, videoRef]);
+    if (intent) desiredPlaying.current = intent.desiredPlaying;
+  }, [canControl, socket, videoRef]);
 
   useEffect(() => {
-    if (!isHost) return;
+    if (!isHost || !canControl) return;
     const timer = window.setInterval(() => {
       const video = videoRef.current;
       if (video && !video.paused) socket.emit("video:action", { action: "sync", currentTime: video.currentTime });
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [isHost, socket, videoRef]);
+  }, [canControl, isHost, socket, videoRef]);
 
-  return { onLoadedMetadata: () => { if (videoState) void applyState(videoState); }, onPlay: () => emit("play"), onPause: () => emit("pause"), onSeeked: () => emit("seek") };
+  return { onLoadedMetadata: () => { if (videoState) void applyState(videoState, true); }, onPlay: () => emit("play"), onPause: () => emit("pause"), onSeeked: () => emit("seek") };
 }

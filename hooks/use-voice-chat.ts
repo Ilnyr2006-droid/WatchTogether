@@ -7,7 +7,8 @@ import { reconcilePeerIds, recoveryAction } from "@/lib/webrtc-recovery";
 import { microphoneConstraintAttempts } from "@/lib/microphone-constraints";
 import type { ClientToServerEvents, Participant, ServerToClientEvents, VoiceConnectionState, VoiceDiagnostic } from "@/types/realtime";
 
-const FALLBACK_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+const E2E_MODE = typeof document !== "undefined" && document.documentElement.dataset.watchtogetherE2e === "true";
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = E2E_MODE ? [] : [{ urls: "stun:stun.l.google.com:19302" }];
 
 interface PeerContext {
   id: string;
@@ -83,7 +84,7 @@ export function useVoiceChat(socket: Socket<ServerToClientEvents, ClientToServer
       .then(async (response) => {
         if (!response.ok) throw new Error("ICE configuration unavailable");
         const data = await response.json() as IceServerApiResponse;
-        if (!Array.isArray(data.iceServers) || data.iceServers.length === 0) throw new Error("Invalid ICE configuration");
+        if (!Array.isArray(data.iceServers) || (data.iceServers.length === 0 && !E2E_MODE)) throw new Error("Invalid ICE configuration");
         iceServersRef.current = data.iceServers;
         iceExpiresAtRef.current = typeof data.expiresAt === "number" ? data.expiresAt : null;
         return data.iceServers;
@@ -245,7 +246,7 @@ export function useVoiceChat(socket: Socket<ServerToClientEvents, ClientToServer
   }, [ensurePeer, setPeerState, socket]);
 
   useEffect(() => {
-    const reconciliation = reconcilePeerIds(peersRef.current.keys(), participants.map((participant) => participant.socketId), socket.id);
+    const reconciliation = reconcilePeerIds(peersRef.current.keys(), participants.flatMap((participant) => participant.connected && participant.socketId ? [participant.socketId] : []), socket.id);
     reconciliation.remove.forEach((id) => cleanupPeer(id));
     setPeerStates((current) => Object.fromEntries(Object.entries(current).filter(([id]) => reconciliation.active.has(id))));
     if (streamRef.current) reconciliation.create.forEach((id) => ensurePeer(id));
@@ -255,7 +256,7 @@ export function useVoiceChat(socket: Socket<ServerToClientEvents, ClientToServer
   useEffect(() => {
     const cleanupAll = () => {
       peersRef.current.forEach((_, id) => cleanupPeer(id, true));
-      setPeerStates(Object.fromEntries(participantsRef.current.filter((participant) => participant.socketId !== socket.id).map((participant) => [participant.socketId, "reconnecting" as const])));
+      setPeerStates(Object.fromEntries(participantsRef.current.filter((participant) => participant.connected && participant.socketId && participant.socketId !== socket.id).map((participant) => [participant.socketId!, "reconnecting" as const])));
     };
     const onDisconnect = () => { cleanupAll(); localSpeakingCleanupRef.current?.(); localSpeakingCleanupRef.current = null; };
     const onConnect = () => {
@@ -329,7 +330,7 @@ export function useVoiceChat(socket: Socket<ServerToClientEvents, ClientToServer
         const stream = await requestMicrophone(selectedDeviceId || undefined);
         attachLocalStream(stream);
         await refreshDevices();
-        participantsRef.current.filter((participant) => participant.socketId !== socket.id).forEach((participant) => ensurePeer(participant.socketId));
+        participantsRef.current.filter((participant) => participant.connected && participant.socketId && participant.socketId !== socket.id).forEach((participant) => ensurePeer(participant.socketId!));
       }
       const nextMuted = !mutedRef.current;
       mutedRef.current = nextMuted;

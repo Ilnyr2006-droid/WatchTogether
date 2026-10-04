@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { isE2ETestMode } from "@/server/e2e-mode";
 
 export const DEFAULT_STUN_URL = "stun:stun.l.google.com:19302";
 
@@ -33,6 +34,7 @@ export function generateTurnCredentials(options: TurnCredentialOptions): IceServ
 }
 
 export function iceServersFromEnvironment(userId?: string): IceServerResponse {
+  if (isE2ETestMode()) return { iceServers: [], expiresAt: null };
   const turnUrls = (process.env.TURN_URL || "").split(",").map((url) => url.trim()).filter(Boolean);
   const secret = process.env.TURN_SECRET?.trim();
   const stunUrl = process.env.STUN_URL?.trim() || DEFAULT_STUN_URL;

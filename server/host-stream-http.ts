@@ -45,9 +45,9 @@ export async function handleHostStreamRequest(request: IncomingMessage, response
 
 async function listHostFiles(request: IncomingMessage, response: ServerResponse, roomId: string, dependencies: HostStreamHttpDependencies) {
   if (request.method !== "GET") return methodNotAllowed(response, "GET");
-  const session = authorizeBearerHost(request, roomId, dependencies);
+  const session = authorizeBearerOwner(request, roomId, dependencies);
   if (session === "unauthorized") return sendJson(response, 401, { error: "Сначала войдите в эту комнату" });
-  if (session === "forbidden") return sendJson(response, 403, { error: "Список фильмов доступен только Host" });
+  if (session === "forbidden") return sendJson(response, 403, { error: "Файлы компьютера доступны только владельцу комнаты" });
   if (!dependencies.media.isConfigured()) return sendJson(response, 503, { error: "Дополнительная папка WATCHTOGETHER_MEDIA_DIR не настроена" });
   try { return sendJson(response, 200, { files: await dependencies.media.list() }); }
   catch { return sendJson(response, 422, { error: "Не удалось прочитать папку с фильмами" }); }
@@ -55,9 +55,9 @@ async function listHostFiles(request: IncomingMessage, response: ServerResponse,
 
 async function selectHostFile(request: IncomingMessage, response: ServerResponse, roomId: string, dependencies: HostStreamHttpDependencies) {
   if (request.method !== "POST") return methodNotAllowed(response, "POST");
-  const session = authorizeBearerHost(request, roomId, dependencies);
+  const session = authorizeBearerOwner(request, roomId, dependencies);
   if (session === "unauthorized") return sendJson(response, 401, { error: "Сначала войдите в эту комнату" });
-  if (session === "forbidden") return sendJson(response, 403, { error: "Только Host может выбрать фильм" });
+  if (session === "forbidden") return sendJson(response, 403, { error: "Только владелец комнаты может выбрать файл" });
   if (!dependencies.media.isConfigured()) return sendJson(response, 503, { error: "Дополнительная папка WATCHTOGETHER_MEDIA_DIR не настроена" });
 
   try {
@@ -80,9 +80,9 @@ async function selectHostFile(request: IncomingMessage, response: ServerResponse
 
 async function pickHostFile(request: IncomingMessage, response: ServerResponse, roomId: string, dependencies: HostStreamHttpDependencies) {
   if (request.method !== "POST") return methodNotAllowed(response, "POST");
-  const session = authorizeBearerHost(request, roomId, dependencies);
+  const session = authorizeBearerOwner(request, roomId, dependencies);
   if (session === "unauthorized") return sendJson(response, 401, { error: "Сначала войдите в эту комнату" });
-  if (session === "forbidden") return sendJson(response, 403, { error: "Только Host может выбрать фильм" });
+  if (session === "forbidden") return sendJson(response, 403, { error: "Только владелец комнаты может выбрать файл" });
 
   try {
     const selectedPath = await dependencies.picker.pick();
@@ -99,11 +99,11 @@ async function pickHostFile(request: IncomingMessage, response: ServerResponse, 
   }
 }
 
-function authorizeBearerHost(request: IncomingMessage, roomId: string, dependencies: HostStreamHttpDependencies) {
+function authorizeBearerOwner(request: IncomingMessage, roomId: string, dependencies: HostStreamHttpDependencies) {
   const token = bearerToken(request.headers.authorization);
   const session = token ? dependencies.rooms.authorizeStream(roomId, token) : null;
   if (!session) return "unauthorized" as const;
-  if (!session.isHost) return "forbidden" as const;
+  if (!session.isOwner) return "forbidden" as const;
   return session;
 }
 
@@ -134,7 +134,7 @@ async function streamHostFile(request: IncomingMessage, response: ServerResponse
   try { file = await dependencies.streams.refresh(roomId); }
   catch { file = null; }
   if (!file || file.fileName !== source.fileName || file.streamId !== source.streamId) {
-    stopUnavailableStream(roomId, dependencies);
+    stopUnavailableStream(roomId, session.participantId, dependencies);
     return sendJson(response, 410, { error: "Фильм больше недоступен на компьютере Host" });
   }
 
@@ -165,9 +165,9 @@ async function streamHostFile(request: IncomingMessage, response: ServerResponse
   fileStream.pipe(response);
 }
 
-function stopUnavailableStream(roomId: string, dependencies: HostStreamHttpDependencies) {
+function stopUnavailableStream(roomId: string, participantId: string, dependencies: HostStreamHttpDependencies) {
   dependencies.streams.clear(roomId);
-  const video = dependencies.rooms.clearSource(roomId);
+  const video = dependencies.rooms.clearSource(roomId, participantId);
   if (video) dependencies.io.to(roomId).emit("video:state", video);
   dependencies.io.to(roomId).emit("room:error", { code: "HOST_STREAM_UNAVAILABLE", message: "Фильм больше недоступен на компьютере Host" });
 }

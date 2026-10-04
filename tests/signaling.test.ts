@@ -13,6 +13,19 @@ describe("signaling authorization and validation", () => {
     expect(canRelaySignal(rooms, "sender", "sender")).toBe(false);
   });
 
+  it("routes signaling only to the participant's current socket after reconnect", () => {
+    const rooms = new RoomManager();
+    const host = rooms.create("host-socket", "Host");
+    const roomToken = rooms.getCredentials("host-socket")!.roomToken;
+    const guestJoin = rooms.join(host.id, "guest-old", "Guest", roomToken)!;
+    const guest = guestJoin.room.participants.find((person) => person.socketId === "guest-old")!;
+    const credentials = rooms.getCredentials("guest-old")!;
+    rooms.join(host.id, "guest-new", "Guest", roomToken, { participantId: guest.id, sessionToken: credentials.sessionToken });
+    expect(canRelaySignal(rooms, "host-socket", "guest-old")).toBe(false);
+    expect(canRelaySignal(rooms, "host-socket", "guest-new")).toBe(true);
+    expect(rooms.get(host.id)?.participants).toHaveLength(2);
+  });
+
   it("rejects oversized SDP and ICE payloads", () => {
     expect(signalDescriptionSchema.safeParse({ to: "peer", description: { type: "offer", sdp: "x".repeat(64_001) } }).success).toBe(false);
     expect(signalCandidateSchema.safeParse({ to: "peer", candidate: { candidate: "x".repeat(4_097) } }).success).toBe(false);
