@@ -3,14 +3,16 @@
 import { RefObject, useCallback, useEffect, useRef } from "react";
 import type { Socket } from "socket.io-client";
 import { effectiveVideoTime, getLocalPlaybackIntent, isNewerVideoRevision, needsTimeCorrection, shouldResyncOnControlLoss } from "@/lib/video-sync";
+import { useMediaSession } from "@/hooks/use-media-session";
 import type { ClientToServerEvents, ServerToClientEvents, VideoState } from "@/types/realtime";
 
-export function useVideoSync({ videoRef, isHost, canControl = true, socket, videoState }: {
+export function useVideoSync({ videoRef, isHost, canControl = true, socket, videoState, roomName }: {
   videoRef: RefObject<HTMLVideoElement | null>;
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
   isHost: boolean;
   canControl?: boolean;
   videoState: VideoState | null;
+  roomName: string;
 }) {
   const applyingRemote = useRef(false);
   const latestRevision = useRef(-1);
@@ -19,6 +21,27 @@ export function useVideoSync({ videoRef, isHost, canControl = true, socket, vide
   const desiredPlaying = useRef<boolean | null>(null);
   const unlockTimer = useRef<number | undefined>(undefined);
   const previousCanControl = useRef(canControl);
+
+  useMediaSession({
+    canControl,
+    roomName,
+    source: videoState?.source ?? null,
+    videoRef,
+    actions: {
+      play: () => {
+        const video = videoRef.current;
+        if (video?.paused) return video.play().catch(() => {});
+      },
+      pause: () => {
+        const video = videoRef.current;
+        if (video && !video.paused) video.pause();
+      },
+      seekTo: (time) => {
+        const video = videoRef.current;
+        if (video && Number.isFinite(time)) video.currentTime = time;
+      },
+    },
+  });
 
   const applyState = useCallback(async (state: VideoState, force = false) => {
     const video = videoRef.current;

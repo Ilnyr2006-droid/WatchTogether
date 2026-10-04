@@ -53,7 +53,7 @@ test("Host transfers the local MP4 to two Guests over P2P without external ICE",
       });
     }
 
-    await host.page.getByRole("button", { name: "P2P фильм с компьютера" }).click();
+    await host.page.getByTestId("p2p-test-only").locator("summary").click();
     await host.page.getByLabel("Выбрать P2P-фильм").setInputFiles(resolve(process.cwd(), "tests/e2e/fixtures/e2e-small.mp4"));
     await expect(host.page.getByTestId("video-state")).toHaveAttribute("data-revision", "1");
 

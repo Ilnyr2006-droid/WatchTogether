@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import type { Socket } from "socket.io-client";
 import type { ChatMessage, ClientToServerEvents, ServerToClientEvents } from "@/types/realtime";
 
@@ -22,7 +22,10 @@ export function ChatPanel({ socket, initialMessages = [] }: { socket: Socket<Ser
     socket.on("chat:message", receive);
     return () => { socket.off("chat:message", receive); };
   }, [socket]);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [visibleMessages]);
+  useEffect(() => {
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    endRef.current?.scrollIntoView({ behavior });
+  }, [visibleMessages]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -31,5 +34,23 @@ export function ChatPanel({ socket, initialMessages = [] }: { socket: Socket<Ser
     socket.emit("chat:send", { text: value }, (response) => { if (response.ok) { setText(""); setError(""); } else setError(response.error); });
   }
 
-  return <section className="panel flex min-h-[20rem] flex-col overflow-hidden"><div className="flex items-center gap-2 border-b border-white/10 px-4 py-3"><MessageCircle className="size-4 text-violet-400" /><h2 className="font-semibold">Чат</h2></div><div className="flex-1 space-y-3 overflow-y-auto p-4">{visibleMessages.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Здесь появятся сообщения комнаты</p>}{visibleMessages.map((message) => <div key={message.id}><div className="flex items-baseline gap-2"><span className="text-sm font-semibold text-violet-300">{message.username}</span><time className="text-[10px] text-slate-600">{new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><p className="mt-0.5 break-words text-sm text-slate-300">{message.text}</p></div>)}<div ref={endRef} /></div><form className="border-t border-white/10 p-3" onSubmit={submit}><div className="flex gap-2"><input className="input py-2.5" aria-label="Сообщение в чате" value={text} onChange={(e) => setText(e.target.value)} maxLength={500} placeholder="Сообщение…" /><button className="button-primary px-3 py-2" disabled={!text.trim()} aria-label="Отправить"><Send className="size-4" /></button></div>{error && <p className="mt-2 text-xs text-red-300">{error}</p>}</form></section>;
+  return <section className="chat-panel" aria-label="Чат комнаты">
+    <div className="chat-heading"><h2>Сообщения</h2><span className="participant-count">{visibleMessages.length}</span></div>
+    <div className="chat-messages" role="log" aria-label="Сообщения комнаты" aria-live="polite">
+      {visibleMessages.length === 0 && <p className="chat-empty">Начните разговор — здесь появятся сообщения комнаты.</p>}
+      {visibleMessages.map((message, index) => {
+        const continued = visibleMessages[index - 1]?.username === message.username;
+        return <article key={message.id} className={`chat-message ${continued ? "is-continued" : ""}`} data-testid="chat-message">
+          <div className="chat-message-meta"><strong>{continued ? <span className="sr-only">{message.username}</span> : message.username}</strong><time dateTime={new Date(message.timestamp).toISOString()}>{new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div>
+          <p>{message.text}</p>
+        </article>;
+      })}
+      <div ref={endRef} />
+    </div>
+    <form className="chat-form" onSubmit={submit}>
+      <input className="input" aria-label="Сообщение в чате" value={text} onChange={(event) => setText(event.target.value)} maxLength={500} placeholder="Сообщение…" />
+      <button className="chat-send" disabled={!text.trim()} aria-label="Отправить"><Send aria-hidden="true" /></button>
+    </form>
+    {error && <p className="chat-error" role="alert">{error}</p>}
+  </section>;
 }

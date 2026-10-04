@@ -57,3 +57,25 @@
   - verify: unit-test all four previous/current permission combinations; E2E-delay a Guest play until after Host revoke and assert `FORBIDDEN`, unchanged server revision, restored paused/playhead state and peer convergence; test stream token and transfer cleanup on takeover.
   - done: the permission-loss rollback does not emit a compensating action, and old stream resources cannot outlive their replaced socket.
   - satisfies: R-15, R-16
+
+- T-09 — Add install metadata, safe static caching, and offline shell
+  - files: `app/layout.tsx`, `app/manifest.ts`, PWA registration component, `public/sw.js`, `public/offline.html`, icons, offline UX component, page entry points, PWA E2E tests
+  - action: provide standalone manifest/meta/icons; use a versioned network-first static allowlist with `skipWaiting`/`clients.claim`; serve only a token-free offline shell on failed navigations; show the required network message without simulating room state.
+  - verify: Playwright reads the manifest, confirms the worker controls a page, proves dynamic API/room/query URLs are absent from Cache Storage, and opens the offline shell after network loss.
+  - done: only safe static resources and the offline shell are cached; all room and media operations remain realtime/network-only.
+  - satisfies: R-17, D-03
+
+- T-10 — Add feature-detected PiP and permission-aware Media Session controls
+  - files: `lib/mobile-media.ts`, `hooks/use-picture-in-picture.ts`, `hooks/use-media-session.ts`, `hooks/use-video-sync.ts`, `hooks/use-rutube-player.ts`, HTML5/P2P/RUTUBE player components, mobile control styling, helper and E2E tests
+  - action: add PiP controls to native HTML5/P2P video; publish safe metadata and validated position state; route system play/pause/seek through existing video events or RUTUBE commands and make denied actions inert.
+  - verify: unit-test capability detection, seek conversion, permission gates, and invalid position states; E2E mocks unsupported/supported PiP and exercises Media Session under Host only and Everyone.
+  - done: unsupported APIs add no UI/errors, authorized controls use normal synchronization, and unauthorized system actions cannot change the video element or server state.
+  - satisfies: R-18, D-03
+
+- T-11 — Run requested regression suites
+  - depends on: T-09, T-10
+  - files: no additional files unless a scoped failure requires a fix
+  - action: run `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, and `npm run test:e2e`.
+  - verify: all commands exit successfully; Playwright remains local-only with no outside services.
+  - done: all prior realtime, reconnect, P2P, voice, chat, and new mobile/PWA coverage passes together.
+  - satisfies: R-17, R-18

@@ -47,14 +47,17 @@ export async function createClients(browser: Browser, baseURL: string, names: st
 
 export async function createRoom(page: Page, username: string) {
   await page.goto("/");
-  await page.getByLabel("Ваше имя").fill(username);
   await page.getByRole("button", { name: "Создать комнату" }).click();
+  await page.getByLabel("Ваше имя").fill(username);
+  await page.getByRole("button", { name: "Создать →", exact: true }).click();
   await expect(page).toHaveURL(/\/room\/[a-z0-9]{10}\?token=/);
+  await openRoomTab(page, "Люди");
   await expect(page.getByLabel("Кто управляет видео")).toBeVisible();
   await expect(page.getByTestId("video-state")).toHaveAttribute("data-revision", "0");
   await waitForParticipant(page, username, 1);
-  await expect(page.getByText("Вы управляете просмотром", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("participant").filter({ hasText: username })).toHaveAttribute("data-is-host", "true");
   await expect(page.locator("html")).toHaveAttribute("data-watchtogether-e2e", "true");
+  await openSourcePicker(page);
 
   const testServices = await page.evaluate(async () => {
     const [network, ice] = await Promise.all([
@@ -71,11 +74,14 @@ export async function createRoom(page: Page, username: string) {
 
 export async function joinRoom(page: Page, invitation: string, username: string) {
   await page.goto("/");
+  await page.getByRole("button", { name: "Войти по приглашению" }).click();
   await page.getByLabel("Ваше имя").fill(username);
   await page.getByLabel("Ссылка-приглашение").fill(invitation);
   await page.getByRole("button", { name: "Подключиться" }).click();
   await expect(page).toHaveURL(/\/room\/[a-z0-9]{10}\?token=/);
+  await openRoomTab(page, "Люди");
   await expect(page.getByTestId("participant-count")).toBeVisible();
+  await openSourcePicker(page);
 }
 
 export async function getInvitation(page: Page) {
@@ -85,7 +91,7 @@ export async function getInvitation(page: Page) {
 }
 
 export async function waitForParticipant(page: Page, username: string, count?: number) {
-  await expect(page.getByTestId("participant").filter({ has: page.getByText(username, { exact: true }) })).toBeVisible();
+  await expect(page.getByTestId("participant").filter({ has: page.getByText(username, { exact: true }) })).toHaveCount(1);
   if (count !== undefined) await expect(page.getByTestId("participant-count")).toHaveText(String(count));
 }
 
@@ -99,8 +105,20 @@ export async function participantSnapshot(page: Page) {
 }
 
 export async function setPlaybackMode(page: Page, mode: "everyone" | "host-only" | "approved") {
+  await openRoomTab(page, "Люди");
   await page.getByLabel("Кто управляет видео").selectOption(mode);
   await expect(page.getByLabel("Кто управляет видео")).toHaveValue(mode);
+}
+
+export async function openRoomTab(page: Page, label: "Очередь" | "Чат" | "Люди") {
+  const tab = page.getByRole("tab", { name: label });
+  if (await tab.getAttribute("aria-selected") !== "true") await tab.click();
+}
+
+export async function openSourcePicker(page: Page) {
+  if (await page.getByRole("button", { name: "Добавить", exact: true }).getAttribute("aria-expanded") !== "true") {
+    await page.getByRole("button", { name: "Добавить", exact: true }).click();
+  }
 }
 
 export async function emitSocketEvent(page: Page, event: string, payload?: unknown) {

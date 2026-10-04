@@ -15,9 +15,9 @@ import {
 } from "./helpers";
 
 async function chooseLocalFixture(page: import("@playwright/test").Page, baseURL: string) {
-  await page.getByRole("button", { name: "Видео по URL" }).click();
-  await page.getByPlaceholder("https://cdn.example.com/movie.mp4").fill(`${baseURL}/api/e2e/fixture/e2e-small.mp4`);
-  await page.getByRole("button", { name: "Открыть" }).click();
+  await page.getByRole("button", { name: "URL / RUTUBE" }).click();
+  await page.getByLabel("URL / RUTUBE").fill(`${baseURL}/api/e2e/fixture/e2e-small.mp4`);
+  await page.getByRole("button", { name: "Сменить сейчас" }).click();
   await expect(page.getByTestId("video-state")).toHaveAttribute("data-revision", "1");
   await expect.poll(async () => (await mediaState(page)).readyState).toBeGreaterThanOrEqual(1);
   await page.getByTestId("shared-video").evaluate((video: HTMLVideoElement) => { video.muted = true; });

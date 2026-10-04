@@ -12,6 +12,9 @@
 - T-06 — done — two-guest P2P transfer recovers after an ordinary Socket.IO reconnect with stable identity and increasing received bytes.
 - T-07 — done — all requested checks passed: 74 unit tests and 7 offline E2E tests, typecheck, lint, and production build.
 - T-08 — done — HTML5/P2P and RUTUBE force-resync only on control loss; the delayed-play/revoke E2E verifies `FORBIDDEN`, unchanged revision, paused media and restored playhead; takeover tests verify stream-token invalidation and active-transfer closure.
+- T-09 — done — PWA manifest/icons, versioned static-only service worker, offline fallback, update handling, and connection notice pass manifest/cache/offline E2E.
+- T-10 — done — HTML5/P2P PiP, safe Media Session actions for HTML5/P2P/RUTUBE, mobile-sized controls, and feature/permission tests pass.
+- T-11 — done — final validation passed: 81 unit tests, typecheck, lint, production build, and all 11 Playwright E2E tests.
 
 ## Decisions and blockers
 - Requester confirmed the decision digest and glossary and authorized implementation on 2026-10-04.
@@ -28,4 +31,6 @@
 - Existing local E2E server uses port 4173 and `WATCHTOGETHER_E2E=true`; fixture media and loopback STUN are already present.
 - Implementation is complete on the planned branch; validation used the local E2E fixture, isolated test port, and loopback-only ICE configuration.
 - Final validation for T-08 passed: 76 unit tests, typecheck, lint, build, and 8 offline Playwright E2E tests.
+- Final validation for T-09/T-10 passed: 81 unit tests, typecheck, lint, build, and 11 Playwright E2E tests; PWA cache contains only allowlisted static resources.
 - No production deployment or restart was performed.
+- D-03 — resolved 2026-10-04: retain the current video/realtime architecture; install and system media integrations remain thin adapters around existing room and player behavior.

@@ -26,6 +26,14 @@ export const roomJoinSchema = z
   .strict();
 export const roomControlModeSchema = z.object({ mode: z.enum(["everyone", "host-only", "approved"]) }).strict();
 export const roomControlTargetSchema = z.object({ participantId: z.string().regex(/^[a-f0-9]{32}$/) }).strict();
+const playlistItemIdSchema = z.string().regex(/^[a-f0-9]{24}$/);
+export const playlistAddRemoteSchema = z.object({ input: submittedUrlSchema }).strict();
+export const playlistItemSchema = z.object({ itemId: playlistItemIdSchema }).strict();
+export const playlistPlaybackSchema = z.object({ itemId: playlistItemIdSchema, playbackId: z.string().regex(/^[a-f0-9]{32}$/) }).strict();
+export const playlistMoveSchema = z.object({ itemId: playlistItemIdSchema, direction: z.enum(["up", "down"]) }).strict();
+export const ownerMediaPathSchema = z.object({ path: z.string().trim().min(1).max(4096).refine((value) => !value.includes("\0")) }).strict();
+export const ownerMediaIdSchema = z.object({ mediaId: z.string().regex(/^[A-Za-z0-9_-]{32}$/) }).strict();
+export const hostMediaSelectionSchema = z.object({ fileId: z.string().regex(/^[A-Za-z0-9_-]{32}$/) }).strict();
 export const participantUpdateSchema = z
   .object({ muted: z.boolean().optional(), ready: z.boolean().optional() })
   .strict()

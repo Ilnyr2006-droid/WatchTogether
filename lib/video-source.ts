@@ -65,7 +65,7 @@ export function publicSourceLabel(source: VideoSource | null) {
   if (!source) return "Не выбран";
   if (source.provider === "rutube") return "RUTUBE";
   if (source.mode === "local") return "Локальный файл у каждого";
-  if (source.mode === "host-stream") return `Фильм Host · ${source.fileName}`;
-  if (source.mode === "p2p-movie") return `P2P фильм · ${source.fileName}`;
+  if (source.mode === "host-stream") return `Фильм с компьютера · ${source.fileName}`;
+  if (source.mode === "p2p-movie") return `Фильм · ${source.fileName}`;
   return "Видео по URL";
 }

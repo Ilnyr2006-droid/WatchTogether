@@ -25,7 +25,7 @@ test("Everyone, Host only, and Ask control permissions are enforced by the serve
     const invitation = await getInvitation(host.page);
     await joinRoom(guestA.page, invitation!, guestA.name);
     await joinRoom(guestB.page, invitation!, guestB.name);
-    await expect(guestA.page.getByText("Вы можете управлять просмотром", { exact: true })).toBeVisible();
+    await expect(guestA.page.getByTestId("control-settings")).toContainText("Все могут управлять");
     await Promise.all([watchRoomErrors(guestA.page), watchRoomErrors(guestB.page)]);
 
     const fixtureUrl = `${baseURL}/api/e2e/fixture/e2e-small.mp4`;
@@ -45,7 +45,7 @@ test("Everyone, Host only, and Ask control permissions are enforced by the serve
     await expect(host.page.getByTestId("video-state")).toHaveAttribute("data-revision", "3");
 
     await setPlaybackMode(host.page, "host-only");
-    await expect(guestA.page.getByText("Просмотром управляет Host", { exact: true })).toBeVisible();
+    await expect(guestA.page.getByTestId("control-settings")).toContainText("Только Host");
     await expectForbidden(guestA.page, () => emitSocketEvent(guestA.page, "room:control-mode", { mode: "everyone" }));
     await expectForbidden(guestA.page, () => emitSocketEvent(guestA.page, "video:action", { action: "pause", currentTime: 2 }));
     await expectForbidden(guestA.page, () => emitSocketEvent(guestA.page, "video:set-source", { input: fixtureUrl }));
@@ -53,7 +53,7 @@ test("Everyone, Host only, and Ask control permissions are enforced by the serve
     await expect(host.page.getByTestId("video-state")).toHaveAttribute("data-playing", "false");
 
     await setPlaybackMode(host.page, "approved");
-    await expect(guestA.page.getByText("Просмотром управляет Host", { exact: true })).toBeVisible();
+    await expect(guestA.page.getByTestId("control-settings")).toContainText("По разрешению Host");
     await guestB.page.getByRole("button", { name: "Запросить управление" }).click();
     await expect(host.page.getByText("Guest B просит управление")).toBeVisible();
     await host.page.getByRole("button", { name: "Отклонить" }).click();
@@ -62,12 +62,12 @@ test("Everyone, Host only, and Ask control permissions are enforced by the serve
     await expect(host.page.getByText("Guest A просит управление")).toBeVisible();
     await host.page.getByRole("button", { name: "Разрешить" }).click();
     await expect(guestA.page.getByRole("button", { name: "Управление разрешено" })).toBeDisabled();
-    await expect(guestA.page.getByText("Вам разрешено управлять просмотром", { exact: true })).toBeVisible();
+    await expect(guestA.page.getByTestId("control-settings")).toContainText("Управление разрешено");
 
     await setPlaybackMode(host.page, "host-only");
-    await expect(guestA.page.getByText("Просмотром управляет Host", { exact: true })).toBeVisible();
+    await expect(guestA.page.getByTestId("control-settings")).toContainText("Только Host");
     await setPlaybackMode(host.page, "approved");
-    await expect(guestA.page.getByText("Вам разрешено управлять просмотром", { exact: true })).toBeVisible();
+    await expect(guestA.page.getByTestId("control-settings")).toContainText("По разрешению Host");
 
     await emitSocketEvent(guestA.page, "video:set-source", { input: fixtureUrl });
     await expect(host.page.getByTestId("video-state")).toHaveAttribute("data-revision", "5");
@@ -77,7 +77,7 @@ test("Everyone, Host only, and Ask control permissions are enforced by the serve
 
     await host.page.getByRole("button", { name: "Отозвать" }).click();
     await expect(guestA.page.getByRole("button", { name: "Запросить управление" })).toBeEnabled();
-    await expect(guestA.page.getByText("Просмотром управляет Host", { exact: true })).toBeVisible();
+    await expect(guestA.page.getByTestId("control-settings")).toContainText("По разрешению Host");
     await expectForbidden(guestA.page, () => emitSocketEvent(guestA.page, "video:action", { action: "pause", currentTime: 4 }));
     await emitSocketEvent(host.page, "video:action", { action: "pause", currentTime: 4 });
     await expect(host.page.getByTestId("video-state")).toHaveAttribute("data-playing", "false");

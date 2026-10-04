@@ -3,7 +3,9 @@ import { loadEnvFile } from "node:process";
 import next from "next";
 import { attachSocketServer } from "./server/socket-server";
 import { handleHostStreamRequest } from "./server/host-stream-http";
+import { handleLocalMediaRequest } from "./server/local-media-http";
 import { HostStreamRegistry } from "./server/host-stream-registry";
+import { LocalMediaRegistry } from "./server/local-media-registry";
 import { RoomManager } from "./server/room-manager";
 import { HostMediaCatalog } from "./server/host-media-catalog";
 import { NativeHostFilePicker } from "./server/host-file-picker";
@@ -25,12 +27,14 @@ async function main() {
   await app.prepare();
   const rooms = new RoomManager();
   const streams = new HostStreamRegistry();
+  const localMedia = new LocalMediaRegistry();
   const media = new HostMediaCatalog();
   const picker = new NativeHostFilePicker();
   let realtime: ReturnType<typeof attachSocketServer> | null = null;
   const server = createServer((request, response) => {
     void (async () => {
       try {
+        if (realtime && await handleLocalMediaRequest(request, response, { rooms, localMedia, catalog: media, picker, io: realtime.io })) return;
         if (realtime && await handleHostStreamRequest(request, response, { rooms, streams, media, picker, io: realtime.io })) return;
         await handle(request, response);
       } catch {
@@ -39,7 +43,7 @@ async function main() {
       }
     })();
   });
-  realtime = attachSocketServer(server, { rooms, streams });
+  realtime = attachSocketServer(server, { rooms, streams, localMedia });
   server.listen(port, hostname, () => {
     console.log(`WatchTogether is ready at http://${hostname}:${port}`);
   });

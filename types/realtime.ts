@@ -8,6 +8,8 @@ export type VideoSource =
       mode: "host-stream";
       fileName: string;
       streamId: string;
+      /** Present for Owner-registered room playlist media; never a filesystem path. */
+      mediaId?: string;
     }
   | {
       provider: "html5";
@@ -48,6 +50,23 @@ export interface VideoState {
   updatedBy: string | null;
 }
 
+export interface LocalMediaPublic {
+  mediaId: string;
+  fileName: string;
+  size: number;
+}
+
+interface PlaylistItemBase {
+  id: string;
+  title: string;
+  addedBy: string;
+  addedAt: number;
+}
+export type PlaylistItem = PlaylistItemBase & (
+  | { type: "remote"; source: { type: "remote"; input: string } }
+  | { type: "local"; source: { type: "local"; mediaId: string; fileName: string; size: number } }
+);
+
 export type RoomControlMode = "everyone" | "host-only" | "approved";
 export type RoomControlAction = "approve" | "reject" | "revoke";
 
@@ -60,6 +79,9 @@ export interface RoomState {
   controlMode: RoomControlMode;
   controlRequests: string[];
   approvedControllerIds: string[];
+  playlist: PlaylistItem[];
+  currentPlaylistItemId: string | null;
+  currentPlaylistPlaybackId: string | null;
 }
 
 export interface ChatMessage {
@@ -92,6 +114,7 @@ export interface ServerToClientEvents {
   }) => void;
   "participant:update": (participant: Participant) => void;
   "video:state": (video: VideoState) => void;
+  "room:playlist-error": (payload: { itemId: string; message: string }) => void;
   "chat:message": (message: ChatMessage) => void;
   "room:control-request": (participantId: string) => void;
   "webrtc:offer": (payload: SignalDescription) => void;
@@ -121,11 +144,11 @@ type Ack<T = undefined> = (
 export interface ClientToServerEvents {
   "room:create": (
     payload: { username: string },
-    ack: Ack<{ roomId: string; roomToken: string; ownerToken: string; participantId: string; sessionToken: string }>,
+    ack: Ack<{ roomId: string; roomToken: string; ownerToken: string; participantId: string; sessionToken: string; isOwner: true }>,
   ) => void;
   "room:join": (
     payload: { roomId: string; username: string; roomToken: string; ownerToken?: string; participantId?: string; sessionToken?: string },
-    ack: Ack<{ room: RoomState; streamToken: string; participantId: string; sessionToken: string }>,
+    ack: Ack<{ room: RoomState; streamToken: string; participantId: string; sessionToken: string; isOwner: boolean }>,
   ) => void;
   "room:leave": (ack?: Ack) => void;
   "participant:update": (payload: { muted?: boolean; ready?: boolean }) => void;
@@ -139,6 +162,13 @@ export interface ClientToServerEvents {
     action: VideoAction;
     currentTime: number;
   }) => void;
+  "playlist:add-remote": (payload: { input: string }) => void;
+  "playlist:play": (payload: { itemId: string }) => void;
+  "playlist:remove": (payload: { itemId: string }) => void;
+  "playlist:move": (payload: { itemId: string; direction: "up" | "down" }) => void;
+  "playlist:clear": () => void;
+  "playlist:next": (payload: { itemId: string; playbackId: string }) => void;
+  "playlist:ended": (payload: { itemId: string; playbackId: string }) => void;
   "chat:send": (payload: { text: string }, ack: Ack) => void;
   "room:control-mode": (payload: { mode: RoomControlMode }) => void;
   "room:control-request": () => void;

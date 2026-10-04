@@ -251,6 +251,25 @@ describe("RoomManager", () => {
     expect(manager.authorizeStream(room.id, token)).toBeNull();
   });
 
+  it("reuses the stream token when room join is repeated on the same active socket", () => {
+    const manager = new RoomManager();
+    const room = manager.create("host", "Host");
+    const auth = manager.getCredentials("host")!;
+    const first = manager.issueStreamToken("host")!;
+    const repeatedJoin = manager.join(room.id, "host", "Host", auth.roomToken)!;
+    expect(repeatedJoin.participantId).toBe(auth.participantId);
+    expect(manager.issueStreamToken("host")).toBe(first);
+    expect(manager.authorizeStream(room.id, first)).not.toBeNull();
+
+    const takeover = manager.join(room.id, "host-reloaded", "Host", auth.roomToken, {
+      participantId: auth.participantId!,
+      sessionToken: auth.sessionToken,
+    })!;
+    expect(takeover.replacedSocketId).toBe("host");
+    expect(manager.authorizeStream(room.id, first)).toBeNull();
+    expect(manager.issueStreamToken("host-reloaded")).not.toBe(first);
+  });
+
   it("requires the cryptographic room token and session secret", () => {
     const manager = new RoomManager(); const room = manager.create("host", "Host");
     const auth = manager.getCredentials("host")!;

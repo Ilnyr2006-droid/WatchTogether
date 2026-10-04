@@ -17,11 +17,11 @@ export function ControlSettings({ socket, room, participantId, isHost, canContro
   canControl: boolean;
 }) {
   const pending = room.controlRequests.includes(participantId);
-  return <section className="panel p-4" data-testid="control-settings">
-    <h2 className="font-semibold">Управление комнатой</h2>
+  return <section className="control-settings" data-testid="control-settings">
+    <h2 className="font-semibold">Управление просмотром</h2>
     {isHost ? <>
       <label className="mt-3 block text-xs text-slate-400" htmlFor="control-mode">Кто управляет видео</label>
-      <select id="control-mode" className="input mt-1 py-2" value={room.controlMode} onChange={(event) => socket.emit("room:control-mode", { mode: event.target.value as RoomControlMode })}>
+      <select id="control-mode" className="input mt-2 py-2" value={room.controlMode} onChange={(event) => socket.emit("room:control-mode", { mode: event.target.value as RoomControlMode })}>
         {(Object.keys(labels) as RoomControlMode[]).map((mode) => <option key={mode} value={mode}>{labels[mode]}</option>)}
       </select>
       {room.controlMode === "approved" && <div className="mt-3 space-y-2">
@@ -29,10 +29,10 @@ export function ControlSettings({ socket, room, participantId, isHost, canContro
         {room.controlRequests.map((id) => {
           const participant = room.participants.find((person) => person.id === id);
           if (!participant) return null;
-          return <div key={id} className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.04] px-3 py-2 text-sm">
+          return <div key={id} className="flex items-center justify-between gap-2 border-b border-white/5 py-3 text-xs">
             <span>{participant.username} просит управление</span>
-            <span className="flex gap-2">
-              <button className="text-emerald-300 hover:text-emerald-200" onClick={() => socket.emit("room:control-approve", { participantId: id })}>Разрешить</button>
+            <span className="flex gap-3">
+              <button className="text-slate-100 hover:text-white" onClick={() => socket.emit("room:control-approve", { participantId: id })}>Разрешить</button>
               <button className="text-slate-400 hover:text-white" onClick={() => socket.emit("room:control-reject", { participantId: id })}>Отклонить</button>
             </span>
           </div>;
@@ -40,7 +40,7 @@ export function ControlSettings({ socket, room, participantId, isHost, canContro
         {room.approvedControllerIds.map((id) => {
           const participant = room.participants.find((person) => person.id === id);
           if (!participant) return null;
-          return <div key={id} className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.04] px-3 py-2 text-sm">
+          return <div key={id} className="flex items-center justify-between gap-2 border-b border-white/5 py-3 text-xs">
             <span>{participant.username}: управление разрешено</span>
             <button className="text-amber-300 hover:text-amber-200" onClick={() => socket.emit("room:control-revoke", { participantId: id })}>Отозвать</button>
           </div>;

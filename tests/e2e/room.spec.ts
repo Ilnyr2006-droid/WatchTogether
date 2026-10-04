@@ -4,6 +4,7 @@ import {
   createRoom,
   getInvitation,
   joinRoom,
+  openRoomTab,
   participantSnapshot,
   waitForParticipant,
 } from "./helpers";
@@ -34,6 +35,8 @@ test("Host and two Guests join, share chat, and reconnect without losing identit
     expect(await participantSnapshot(guestA.page)).toEqual(expectedParticipants);
     expect(await participantSnapshot(guestB.page)).toEqual(expectedParticipants);
 
+    for (const client of [host, guestA, guestB]) await openRoomTab(client.page, "Чат");
+
     await host.page.getByLabel("Сообщение в чате").fill("Привет, комната!");
     await host.page.getByRole("button", { name: "Отправить" }).click();
     for (const client of [host, guestA, guestB]) {
@@ -46,12 +49,15 @@ test("Host and two Guests join, share chat, and reconnect without losing identit
       await expect(client.page.getByText("Ответ Guest A", { exact: true })).toHaveCount(1);
     }
 
+    await openRoomTab(host.page, "Люди");
     await host.page.getByLabel("Кто управляет видео").selectOption("approved");
+    await openRoomTab(guestB.page, "Люди");
     await expect(guestB.page.getByRole("button", { name: "Запросить управление" })).toBeEnabled();
     await guestB.page.getByRole("button", { name: "Запросить управление" }).click();
     await expect(host.page.getByText("Guest B просит управление")).toBeVisible();
     await host.page.getByRole("button", { name: "Отклонить" }).click();
     await expect(host.page.getByText("Запросов пока нет")).toBeVisible();
+    await openRoomTab(guestA.page, "Люди");
     await guestA.page.getByRole("button", { name: "Запросить управление" }).click();
     await expect(host.page.getByText("Guest A просит управление")).toBeVisible();
     await host.page.getByRole("button", { name: "Разрешить" }).click();
@@ -64,6 +70,7 @@ test("Host and two Guests join, share chat, and reconnect without losing identit
 
     await guestA.page.reload();
     await waitForParticipant(guestA.page, "Guest A", 3);
+    await openRoomTab(guestA.page, "Люди");
     await expect(guestA.page.getByRole("button", { name: "Управление разрешено" })).toBeDisabled();
     expect((await participantSnapshot(guestA.page)).find((participant) => participant.name === "Guest A")?.id).toBe(guestAId);
     for (const client of [host, guestA, guestB]) {
@@ -73,6 +80,7 @@ test("Host and two Guests join, share chat, and reconnect without losing identit
     }
 
     await host.page.reload();
+    await openRoomTab(host.page, "Люди");
     await expect(host.page.getByLabel("Кто управляет видео")).toHaveValue("approved");
     await expect(host.page.getByTestId("participant").filter({ hasText: "Host" })).toHaveAttribute("data-is-host", "true");
     await waitForParticipant(host.page, "Host", 3);

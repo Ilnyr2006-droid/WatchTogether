@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Check, Copy, LogOut, Wifi, WifiOff } from "lucide-react";
+import { Check, Copy, Info, LogOut } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { ChatPanel } from "@/components/chat/chat-panel";
-import { Participants } from "@/components/room/participants";
+import { ConnectionNotice } from "@/app/connection-notice";
 import { VideoPlayer } from "@/components/video/video-player";
 import { useSocket } from "@/hooks/use-socket";
 import { useVoiceChat } from "@/hooks/use-voice-chat";
+import { RoomDrawer, RoomTabs, type RoomDrawerTab } from "@/components/room/room-drawer";
 import { VoiceControls } from "@/components/voice/voice-controls";
-import { ControlSettings } from "@/components/room/control-settings";
 import { isNewerVideoRevision } from "@/lib/video-sync";
+import { publicSourceLabel } from "@/lib/video-source";
 import type { Participant, RoomState, VideoState } from "@/types/realtime";
 
 export default function RoomPage() {
@@ -22,8 +22,12 @@ export default function RoomPage() {
   const [room, setRoom] = useState<RoomState | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<RoomDrawerTab | null>(null);
+  const [queueSlot, setQueueSlot] = useState<HTMLDivElement | null>(null);
   const [streamToken, setStreamToken] = useState("");
   const [participantId, setParticipantId] = useState("");
+  const [isOwner, setIsOwner] = useState(false);
+  const queueSlotRef = useCallback((node: HTMLDivElement | null) => setQueueSlot(node), []);
   const username =
     typeof window === "undefined"
       ? ""
@@ -80,6 +84,7 @@ export default function RoomPage() {
           setRoom(response.data.room);
           setStreamToken(response.data.streamToken);
           setParticipantId(response.data.participantId);
+          setIsOwner(response.data.isOwner);
           sessionStorage.setItem(`watchtogether:participant-id:${params.roomId}`, response.data.participantId);
           sessionStorage.setItem(`watchtogether:session-token:${params.roomId}`, response.data.sessionToken);
           if (response.data.room.hostId === response.data.participantId && ownerToken)
@@ -191,12 +196,13 @@ export default function RoomPage() {
         ? "Нужна полная ссылка-приглашение с секретным token"
         : "");
     return (
-      <main className="grid min-h-screen place-items-center px-5">
+      <main className="cinema-shell grid min-h-screen place-items-center px-5">
+        <ConnectionNotice connected={connected} />
         <div className="text-center">
           <Logo />
           {!blockingError && (
             <div className="mt-8">
-              <span className="inline-block size-9 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+          <span className="inline-block size-9 animate-spin rounded-full border-2 border-white/50 border-t-transparent" />
             </div>
           )}
           <p className="mt-4 text-slate-400">
@@ -221,109 +227,59 @@ export default function RoomPage() {
 
   const isHost = room.hostId === participantId;
   const canControl = isHost || room.controlMode === "everyone" || (room.controlMode === "approved" && room.approvedControllerIds.includes(participantId));
+  const currentPlaylistItem = room.playlist.find((item) => item.id === room.currentPlaylistItemId) ?? null;
+  const movieTitle = currentPlaylistItem?.title ?? (room.video.source ? publicSourceLabel(room.video.source) : "Ничего не воспроизводится");
+  const controlStatus = isHost ? "Вы управляете просмотром" : room.controlMode === "everyone" ? "Вы можете управлять просмотром" : room.controlMode === "approved" && canControl ? "Вам разрешено управлять просмотром" : "Просмотром управляет Host";
+  const selectTab = (tab: RoomDrawerTab) => setActiveTab((current) => current === tab ? null : tab);
   return (
-    <main className="min-h-screen px-4 py-4 sm:px-6 lg:px-8">
-      <header className="mx-auto mb-5 flex max-w-[1600px] flex-wrap items-center justify-between gap-3">
-        <Logo />
-        <div className="flex items-center gap-2">
-          <span
-            className={`hidden items-center gap-1.5 text-xs sm:flex ${connected ? "text-emerald-400" : "text-amber-400"}`}
-          >
-            {connected ? (
-              <Wifi className="size-4" />
-            ) : (
-              <WifiOff className="size-4" />
-            )}
-            {connected ? "Подключено" : "Переподключение…"}
-          </span>
-          <button className="button-secondary py-2 text-sm" onClick={copy}>
-            {copied ? (
-              <Check className="size-4 text-emerald-400" />
-            ) : (
-              <Copy className="size-4" />
-            )}
-            <span className="hidden sm:inline">
-              {copied ? "Скопировано" : "Пригласить"}
-            </span>
-          </button>
-          <button
-            type="button"
-            className="button-secondary py-2 text-sm text-red-300"
-            onClick={leave}
-          >
-            <LogOut className="size-4" />
-            <span className="hidden sm:inline">Выйти</span>
-          </button>
-        </div>
-      </header>
-      {error && (
-        <div className="mx-auto mb-4 max-w-[1600px] rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          {error}
-        </div>
-      )}
-      {voice.error && (
-        <div className="mx-auto mb-4 max-w-[1600px] rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          {voice.error}
-        </div>
-      )}
-      <div className="mx-auto grid max-w-[1600px] gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0">
-          <VideoPlayer
-            socket={socket}
-            isHost={isHost}
-            canControl={canControl}
-            hostId={room.hostId}
-            participants={room.participants}
-            video={room.video}
-            roomId={room.id}
-            streamToken={streamToken}
-          />
-          <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="font-mono text-sm text-slate-400">
-                Room ID: <span className="text-white">{room.id}</span>
-              </p>
-              {isHost && storedInvitation && (
-                <p className="mt-1 max-w-2xl break-all font-mono text-xs text-violet-300">
-                  {storedInvitation}
-                </p>
-              )}
-              {isHost && storedInvitation.startsWith("http://") && (
-                <p className="mt-1 text-xs text-amber-300">
-                  HTTP подходит для проверки видео, но удалённый микрофон
-                  требует HTTPS. Настройте домен и Caddy.
-                </p>
-              )}
-              {isHost && networkInfo && (
-                <p className="mt-1 text-xs text-slate-500">
-                  Public IPv4: {networkInfo.publicIp || "не определён"} ·
-                  application port: {networkInfo.port}
-                </p>
-              )}
-              <p className="mt-1 text-xs text-slate-600">
-                {isHost
-                  ? "Вы управляете просмотром"
-                  : room.controlMode === "everyone"
-                    ? "Вы можете управлять просмотром"
-                    : room.controlMode === "approved" && canControl
-                      ? "Вам разрешено управлять просмотром"
-                      : "Просмотром управляет Host"}
-              </p>
-            </div>
-            <VoiceControls voice={voice} />
+    <main className="cinema-shell">
+      <ConnectionNotice connected={connected} monitorServer />
+      <div className="room-main">
+        <header className="room-topbar">
+          <Logo />
+          <span className="room-status"><i className={`status-dot ${connected ? "is-online" : "is-waiting"}`} />{connected ? "Подключено" : "Переподключение…"}</span>
+          <span className="room-topbar-spacer" />
+          <div className="room-avatar-stack" aria-label={`Участников: ${room.participants.length}`}>
+            {room.participants.slice(0, 3).map((person) => <span key={person.id} className="room-avatar" title={`${person.username}${person.id === room.hostId ? " · Host" : ""}`} style={{ opacity: person.connected ? 1 : .48 }}>{person.username.slice(0, 1).toUpperCase()}</span>)}
+            {room.participants.length > 3 && <span className="room-avatar room-avatar-more">+{room.participants.length - 3}</span>}
           </div>
+          <button type="button" className="room-header-button invite-button" onClick={copy} aria-label={copied ? "Приглашение скопировано" : "Пригласить участников"}>
+            {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}<span>{copied ? "Скопировано" : "Пригласить"}</span>
+          </button>
+          <details className="room-info">
+            <summary aria-label="Информация о комнате"><Info aria-hidden="true" /></summary>
+            <div className="room-info-popover"><h2>Информация о комнате</h2><p>Код комнаты: <code>{room.id}</code></p>{isHost && networkInfo && <p>Сетевой адрес: {networkInfo.publicIp || "не определён"} · порт {networkInfo.port}</p>}{isHost && storedInvitation.startsWith("http://") && <p>Для удалённого микрофона браузеру требуется защищённое HTTPS-подключение.</p>}</div>
+          </details>
+          <button type="button" className="room-header-button is-exit" onClick={leave} aria-label="Выйти из комнаты"><LogOut aria-hidden="true" /><span className="sr-only">Выйти</span></button>
+        </header>
+        {error && <div className="room-error" role="alert">{error}</div>}
+        {voice.error && <div className="room-error" role="alert">{voice.error}</div>}
+
+        <RoomTabs activeTab={activeTab} onSelect={selectTab} />
+        <div className={`room-workspace ${activeTab ? "with-drawer" : ""}`}>
+          <div className="room-stage-column">
+            <div className="room-stage"><VideoPlayer
+              socket={socket}
+              isHost={isHost}
+              isOwner={isOwner}
+              canControl={canControl}
+              hostId={room.hostId}
+              participants={room.participants}
+              video={room.video}
+              roomId={room.id}
+              streamToken={streamToken}
+              playlist={room.playlist}
+              currentPlaylistItemId={room.currentPlaylistItemId}
+              currentPlaylistPlaybackId={room.currentPlaylistPlaybackId}
+              queuePortal={queueSlot}
+            /></div>
+            <div className="room-movie-meta">
+              <div><h1>{movieTitle}</h1><p>{room.video.source ? controlStatus : isHost ? "Добавьте фильм, чтобы начать совместный просмотр" : "Ожидаем, пока Host выберет фильм"}</p></div>
+              <div className="voice-controls"><VoiceControls voice={voice} /></div>
+            </div>
+          </div>
+          <RoomDrawer activeTab={activeTab} onClose={() => setActiveTab(null)} room={room} participantId={participantId} isHost={isHost} canControl={canControl} socket={socket} voice={voice} queueSlotRef={queueSlotRef} />
         </div>
-        <aside className="grid content-start gap-4 md:grid-cols-2 xl:grid-cols-1">
-          <Participants
-            participants={room.participants}
-            hostId={room.hostId}
-            currentParticipantId={participantId}
-            voiceStates={voice.peerStates}
-            speaking={voice.speaking}
-          />
-          <ControlSettings socket={socket} room={room} participantId={participantId} isHost={isHost} canControl={canControl} />
-          <ChatPanel socket={socket} initialMessages={room.messages} />
-        </aside>
       </div>
     </main>
   );

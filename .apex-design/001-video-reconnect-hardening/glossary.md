@@ -20,3 +20,7 @@
 - `socketId` -> do not use for participant identity or durable permissions; use `participantId`.
 - `ownerToken` -> do not call a room invite or session token.
 - Original owner -> do not assume this is the current Host after transfer.
+- PWA static cache -> explicitly allowlisted same-origin assets and the offline shell; never room/session payloads, API data, invite URLs, or media streams.
+- Offline shell -> token-free static page explaining that the server and a network connection are required; it does not create an offline room.
+- Picture-in-Picture -> browser-controlled floating window for an HTML5 video element, available only when both document and element APIs report support.
+- Media Session -> operating-system/browser media controls whose playback actions pass through the same `canControl`-guarded player handlers as local controls.
